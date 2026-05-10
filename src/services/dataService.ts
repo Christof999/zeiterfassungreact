@@ -165,11 +165,19 @@ class DataServiceClass {
     return this.authReadyPromise
   }
 
+  /** Felder, die Mitarbeiter in der App-Session nicht sehen sollen (liegen nur in Firestore / Admin). */
+  private sanitizeEmployeeForClientSession(employee: Employee): Employee {
+    const { overtimeBalanceMinutes: _removed, ...rest } = employee
+    return rest as Employee
+  }
+
   // Employee Management
   async getCurrentUser(): Promise<Employee | null> {
     try {
       const savedUser = localStorage.getItem('lauffer_current_user')
-      return savedUser ? JSON.parse(savedUser) : null
+      if (!savedUser) return null
+      const parsed = JSON.parse(savedUser) as Employee
+      return this.sanitizeEmployeeForClientSession(parsed)
     } catch (error) {
       console.error('Fehler beim Laden des Benutzers:', error)
       return null
@@ -179,7 +187,8 @@ class DataServiceClass {
   setCurrentUser(user: Employee | null) {
     if (user) {
       const { password, ...safeUserData } = user
-      localStorage.setItem('lauffer_current_user', JSON.stringify(safeUserData))
+      const cleaned = this.sanitizeEmployeeForClientSession(safeUserData as Employee)
+      localStorage.setItem('lauffer_current_user', JSON.stringify(cleaned))
     } else {
       localStorage.removeItem('lauffer_current_user')
     }
@@ -202,7 +211,7 @@ class DataServiceClass {
         
         if (employee.password === password && employee.status === 'active') {
           const { password, ...employeeData } = employee
-          return employeeData as Employee
+          return this.sanitizeEmployeeForClientSession(employeeData as Employee)
         }
       }
       return null

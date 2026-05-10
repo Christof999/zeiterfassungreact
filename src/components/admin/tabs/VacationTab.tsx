@@ -3,8 +3,9 @@ import { DataService } from '../../../services/dataService'
 import type { Employee, LeaveRequest } from '../../../types'
 import { toast } from '../../ToastContainer'
 import '../../../styles/AdminTabs.css'
+import '../../../styles/VacationRequests.css'
 
-type MainTab = 'manage' | 'balance'
+type MainTab = 'manage' | 'balance' | 'teamkalender'
 
 const VacationTab: React.FC = () => {
   const [requests, setRequests] = useState<LeaveRequest[]>([])
@@ -16,10 +17,166 @@ const VacationTab: React.FC = () => {
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null)
   const [rejectionReason, setRejectionReason] = useState('')
   const [balanceEmployeeId, setBalanceEmployeeId] = useState('')
+  const [teamCalMonth, setTeamCalMonth] = useState(
+    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  )
+  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [adminSubmitting, setAdminSubmitting] = useState(false)
+  const [adminForm, setAdminForm] = useState({
+    employeeId: '',
+    startDate: '',
+    endDate: '',
+    type: 'vacation' as LeaveRequest['type'],
+    reason: ''
+  })
+  const [adminWorkingDays, setAdminWorkingDays] = useState(0)
 
   useEffect(() => {
     loadData()
   }, [])
+
+  useEffect(() => {
+    if (adminForm.startDate && adminForm.endDate) {
+      const start = new Date(adminForm.startDate)
+      const end = new Date(adminForm.endDate)
+      if (end >= start) {
+        setAdminWorkingDays(DataService.calculateWorkingDays(start, end))
+      } else {
+        setAdminWorkingDays(0)
+      }
+    } else {
+      setAdminWorkingDays(0)
+    }
+  }, [adminForm.startDate, adminForm.endDate])
+
+  const openCreateLeaveModal = () => {
+    setAdminForm({
+      employeeId: '',
+      startDate: '',
+      endDate: '',
+      type: 'vacation',
+      reason: ''
+    })
+    setAdminWorkingDays(0)
+    setCreateModalOpen(true)
+  }
+
+  const adminConflictMessages = (): string[] => {
+    if (!adminForm.employeeId || !adminForm.startDate || !adminForm.endDate) return []
+    const start = new Date(adminForm.startDate + 'T12:00:00')
+    const end = new Date(adminForm.endDate + 'T12:00:00')
+    if (end < start) return []
+    const msgs: string[] = []
+    const cur = new Date(start)
+    while (cur <= end) {
+      const d0 = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate())
+      const overlaps = requests.filter(r => {
+        if (r.employeeId === adminForm.employeeId) return false
+        if (r.type !== 'vacation') return false
+        if (r.status !== 'approved' && r.status !== 'pending') return false
+        const rs = toDate(r.startDate)
+        const re = toDate(r.endDate)
+        if (!rs || !re) return false
+        const r0 = new Date(rs.getFullYear(), rs.getMonth(), rs.getDate())
+        const r1 = new Date(re.getFullYear(), re.getMonth(), re.getDate())
+        return d0 >= r0 && d0 <= r1
+      })
+      if (overlaps.length > 0) {
+        const label = cur.toLocaleDateString('de-DE', {
+          weekday: 'short',
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        })
+        const names = [...new Set(overlaps.map(o => o.employeeName || '?'))].sort()
+        const list =
+          names.length === 1
+            ? names[0]
+            : `${names.slice(0, -1).join(', ')} und ${names[names.length - 1]}`
+        const head = names.length === 1 ? `hat ${list}` : `haben ${list}`
+        msgs.push(`Am ${label} ${head} bereits Urlaub eingetragen.`)
+      }
+      cur.setDate(cur.getDate() + 1)
+    }
+    return msgs
+  }
+
+  const handleAdminCreateLeave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!adminForm.employeeId) {
+      toast.error('Bitte Mitarbeiter wählen')
+      return
+    }
+    if (!adminForm.startDate || !adminForm.endDate) {
+      toast.error('Zeitraum angeben')
+      return
+    }
+    if (new Date(adminForm.endDate) < new Date(adminForm.startDate)) {
+      toast.error('Enddatum nach Startdatum')
+      return
+    }
+    if (adminWorkingDays === 0) {
+      toast.error('Der Zeitraum enthält keine Arbeitstage')
+      return
+    }
+    const emp = employees.find(x => x.id === adminForm.employeeId)
+    const employeeName = emp?.name || `${emp?.firstName} ${emp?.lastName}` || 'Mitarbeiter'
+
+    setAdminSubmitting(true)
+    try {
+      await DataService.createLeaveRequest({
+        employeeId: adminForm.employeeId,
+        employeeName,
+        startDate: new Date(adminForm.startDate),
+        endDate: new Date(adminForm.endDate),
+        type: adminForm.type,
+        reason: adminForm.reason,
+        workingDays: adminWorkingDays
+      })
+      toast.success('Urlaubsantrag erfasst')
+      setCreateModalOpen(false)
+      loadData()
+    } catch (err: any) {
+      toast.error(err?.message || 'Fehler beim Speichern')
+    } finally {
+      setAdminSubmitting(false)
+    }
+  }
+
+  const teamCalendarCells = (): { date: Date; inMonth: boolean }[] => {
+    const y = teamCalMonth.getFullYear()
+    const m = teamCalMonth.getMonth()
+    const first = new Date(y, m, 1)
+    const startPad = (first.getDay() + 6) % 7
+    const cells: { date: Date; inMonth: boolean }[] = []
+    const startDate = new Date(y, m, 1 - startPad)
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(startDate)
+      d.setDate(startDate.getDate() + i)
+      cells.push({ date: d, inMonth: d.getMonth() === m })
+    }
+    return cells
+  }
+
+  const teamVacationOnDay = (
+    day: Date
+  ): { name: string; status: LeaveRequest['status'] }[] => {
+    const d0 = new Date(day.getFullYear(), day.getMonth(), day.getDate())
+    const list: { name: string; status: LeaveRequest['status'] }[] = []
+    for (const r of requests) {
+      if (r.type !== 'vacation') continue
+      if (r.status !== 'approved' && r.status !== 'pending') continue
+      const rs = toDate(r.startDate)
+      const re = toDate(r.endDate)
+      if (!rs || !re) continue
+      const r0 = new Date(rs.getFullYear(), rs.getMonth(), rs.getDate())
+      const r1 = new Date(re.getFullYear(), re.getMonth(), re.getDate())
+      if (d0 >= r0 && d0 <= r1) {
+        list.push({ name: r.employeeName || '?', status: r.status })
+      }
+    }
+    return list
+  }
 
   const loadData = async () => {
     try {
@@ -215,10 +372,22 @@ const VacationTab: React.FC = () => {
         >
           Resturlaub & Freigaben
         </button>
+        <button
+          type="button"
+          className={`subtab-btn ${mainTab === 'teamkalender' ? 'active' : ''}`}
+          onClick={() => setMainTab('teamkalender')}
+        >
+          Team-Kalender
+        </button>
       </div>
 
       {mainTab === 'manage' && (
         <>
+          <div className="vacation-admin-toolbar">
+            <button type="button" className="btn primary-btn" onClick={openCreateLeaveModal}>
+              Neuen Urlaubsantrag erfassen
+            </button>
+          </div>
           <div className="filter-tabs">
             <button
               className={`filter-btn ${filter === 'pending' ? 'active' : ''}`}
@@ -406,6 +575,68 @@ const VacationTab: React.FC = () => {
         </div>
       )}
 
+      {mainTab === 'teamkalender' && (
+        <div className="vacation-team-cal-panel">
+          <p className="vacation-team-cal-intro">
+            Urlaub (genehmigt oder ausstehend) aller Mitarbeiter. Tooltip auf einem Tag zeigt die Namen.
+          </p>
+          <div className="vacation-cal-toolbar admin-cal-toolbar">
+            <button
+              type="button"
+              className="btn secondary-btn cal-nav-btn"
+              onClick={() => setTeamCalMonth(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
+            >
+              ‹
+            </button>
+            <span className="vacation-cal-title">
+              {teamCalMonth.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}
+            </span>
+            <button
+              type="button"
+              className="btn secondary-btn cal-nav-btn"
+              onClick={() => setTeamCalMonth(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
+            >
+              ›
+            </button>
+          </div>
+          <div className="vacation-cal-weekdays admin-cal-weekdays">
+            {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(w => (
+              <span key={w} className="vacation-cal-wd">
+                {w}
+              </span>
+            ))}
+          </div>
+          <div className="vacation-cal-grid admin-cal-grid">
+            {teamCalendarCells().map(({ date, inMonth }, idx) => {
+              const onVac = teamVacationOnDay(date)
+              let cls = 'vacation-cal-cell admin-cal-cell'
+              if (!inMonth) cls += ' other-month'
+              const hasPen = onVac.some(v => v.status === 'pending')
+              const hasApp = onVac.some(v => v.status === 'approved')
+              if (hasPen) cls += ' team-cal-pending'
+              else if (hasApp) cls += ' team-cal-approved'
+              const tip = onVac.map(v => `${v.name} (${v.status === 'pending' ? 'ausstehend' : 'genehmigt'})`).join('; ')
+              return (
+                <div
+                  key={idx}
+                  className={cls}
+                  title={tip || undefined}
+                >
+                  <span className="admin-cal-day-num">{date.getDate()}</span>
+                  {onVac.length > 0 && (
+                    <span className="admin-cal-chip">{onVac.length}</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <p className="vacation-cal-legend admin-cal-legend">
+            <span className="legend-sample team-cal-approved-sample" /> Genehmigt ·{' '}
+            <span className="legend-sample team-cal-pending-sample" /> Ausstehend
+          </p>
+        </div>
+      )}
+
       {rejectModalOpen && selectedRequest && (
         <div className="modal-overlay" onClick={() => setRejectModalOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -438,6 +669,105 @@ const VacationTab: React.FC = () => {
                 Antrag ablehnen
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {createModalOpen && (
+        <div className="modal-overlay" onClick={() => !adminSubmitting && setCreateModalOpen(false)}>
+          <div className="modal-content modal-wide" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Urlaubsantrag erfassen</h3>
+              <button
+                type="button"
+                className="modal-close"
+                disabled={adminSubmitting}
+                onClick={() => setCreateModalOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={handleAdminCreateLeave} className="modal-body">
+              <div className="form-group">
+                <label>Mitarbeiter</label>
+                <select
+                  value={adminForm.employeeId}
+                  onChange={e => setAdminForm({ ...adminForm, employeeId: e.target.value })}
+                  required
+                >
+                  <option value="">— Bitte wählen —</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name || `${emp.firstName} ${emp.lastName}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row-modal">
+                <div className="form-group">
+                  <label>Von</label>
+                  <input
+                    type="date"
+                    value={adminForm.startDate}
+                    onChange={e => setAdminForm({ ...adminForm, startDate: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Bis</label>
+                  <input
+                    type="date"
+                    value={adminForm.endDate}
+                    onChange={e => setAdminForm({ ...adminForm, endDate: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+              {adminWorkingDays > 0 && (
+                <p className="admin-working-days-info">{adminWorkingDays} Arbeitstage im Zeitraum</p>
+              )}
+              <div className="form-group">
+                <label>Art</label>
+                <select
+                  value={adminForm.type}
+                  onChange={e =>
+                    setAdminForm({ ...adminForm, type: e.target.value as LeaveRequest['type'] })
+                  }
+                >
+                  <option value="vacation">Urlaub</option>
+                  <option value="special">Sonderurlaub</option>
+                  <option value="unpaid">Unbezahlter Urlaub</option>
+                  <option value="sick">Krankheit</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Grund / Bemerkung</label>
+                <textarea
+                  value={adminForm.reason}
+                  onChange={e => setAdminForm({ ...adminForm, reason: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              {adminForm.type === 'vacation' &&
+                adminConflictMessages().map((msg, i) => (
+                  <p key={i} className="admin-leave-conflict-msg">
+                    {msg}
+                  </p>
+                ))}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn secondary-btn"
+                  disabled={adminSubmitting}
+                  onClick={() => setCreateModalOpen(false)}
+                >
+                  Abbrechen
+                </button>
+                <button type="submit" className="btn primary-btn" disabled={adminSubmitting}>
+                  {adminSubmitting ? 'Speichert…' : 'Antrag speichern'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
