@@ -4,15 +4,21 @@ import { DataService } from '../services/dataService'
 import type { Employee, LeaveRequest } from '../types'
 import { toast } from './ToastContainer'
 import ThemeToggle from './ThemeToggle'
-import { getTodayLocalDateString } from '../utils/dateUtils'
+import { getTodayLocalDateString, formatDateForInputLocal } from '../utils/dateUtils'
 import '../styles/VacationRequests.css'
 
 const VacationRequests: React.FC = () => {
   const navigate = useNavigate()
   const [currentUser, setCurrentUser] = useState<Employee | null>(null)
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([])
+  /** Alle Anträge (für Kollegen-Konflikte im Kalender), nur geladen wenn Formular offen. */
+  const [allLeaveForCalendar, setAllLeaveForCalendar] = useState<LeaveRequest[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date()
+    return new Date(d.getFullYear(), d.getMonth(), 1)
+  })
   
   // Formular-State
   const [formData, setFormData] = useState({
@@ -69,6 +75,26 @@ const VacationRequests: React.FC = () => {
       setIsLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!showForm || !currentUser?.id) {
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const all = await DataService.getAllLeaveRequests()
+        if (!cancelled) {
+          setAllLeaveForCalendar(all.filter(r => r.employeeId !== currentUser.id))
+        }
+      } catch {
+        if (!cancelled) setAllLeaveForCalendar([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [showForm, currentUser?.id])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -162,36 +188,112 @@ const VacationRequests: React.FC = () => {
   const vacationAccount = currentUser?.vacationDays || { total: 30, used: 0, year: currentYear }
   const totalVacationDays = Number(vacationAccount.total || 30)
   const takenVacationDays = Number(vacationAccount.used || 0)
-  const todayDate = new Date()
-  todayDate.setHours(0, 0, 0, 0)
 
-  const approvedPlannedVacationDays = leaveRequests.reduce((sum, request) => {
-    if (request.type !== 'vacation' || request.status !== 'approved') {
-      return sum
-    }
-
-    const startDate = toDate(request.startDate)
-    const endDate = toDate(request.endDate)
-    if (!startDate || !endDate) {
-      return sum
-    }
-
-    const yearStart = new Date(currentYear, 0, 1)
-    const yearEnd = new Date(currentYear, 11, 31)
-
-    const rangeStart = startDate > yearStart ? startDate : yearStart
-    const effectiveStart = rangeStart > todayDate ? rangeStart : todayDate
-    const rangeEnd = endDate < yearEnd ? endDate : yearEnd
-
-    if (rangeEnd < effectiveStart) {
-      return sum
-    }
-
-    return sum + DataService.calculateWorkingDays(effectiveStart, rangeEnd)
+  /** Genehmigter Urlaub erhöht „used“ am Mitarbeiter automatisch; keine Doppelzählung mit geplanten Anträgen. */
+  const ownPendingVacationDays = leaveRequests.reduce((sum, request) => {
+    if (request.type !== 'vacation' || request.status !== 'pending') return sum
+    return sum + (Number(request.workingDays) || 0)
   }, 0)
 
-  const usedForAccount = takenVacationDays + approvedPlannedVacationDays
+  const usedForAccount = takenVacationDays + ownPendingVacationDays
   const remaining = Math.max(0, totalVacationDays - usedForAccount)
+
+  const colleagueLeaveOverlappingDay = (day: Date): string[] => {
+    const d0 = new Date(day.getFullYear(), day.getMonth(), day.getDate())
+    const names = new Set<string>()
+    for (const req of allLeaveForCalendar) {
+      if (req.status !== 'approved' && req.status !== 'pending') continue
+      if (req.type !== 'vacation') continue
+      const rs = toDate(req.startDate)
+      const re = toDate(req.endDate)
+      if (!rs || !re) continue
+      const r0 = new Date(rs.getFullYear(), rs.getMonth(), rs.getDate())
+      const r1 = new Date(re.getFullYear(), re.getMonth(), re.getDate())
+      if (d0 >= r0 && d0 <= r1) {
+        const n = (req.employeeName || 'Kollege/Kollegin').trim()
+        if (n) names.add(n)
+      }
+    }
+    return [...names].sort()
+  }
+
+  const vacationConflictMessages = (): string[] => {
+    if (!formData.startDate || !formData.endDate) return []
+    const start = new Date(formData.startDate + 'T12:00:00')
+    const end = new Date(formData.endDate + 'T12:00:00')
+    if (end < start) return []
+    const msgs: string[] = []
+    const cur = new Date(start)
+    while (cur <= end) {
+      const colleagues = colleagueLeaveOverlappingDay(cur)
+      if (colleagues.length > 0) {
+        const label = cur.toLocaleDateString('de-DE', {
+          weekday: 'short',
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        })
+        const names =
+          colleagues.length === 1
+            ? colleagues[0]
+            : `${colleagues.slice(0, -1).join(', ')} und ${colleagues[colleagues.length - 1]}`
+        const head =
+          colleagues.length === 1 ? `hat ${names}` : `haben ${names}`
+        msgs.push(`Am ${label} ${head} bereits Urlaub eingetragen.`)
+      }
+      cur.setDate(cur.getDate() + 1)
+    }
+    return msgs
+  }
+
+  const conflictMsgs = showForm ? vacationConflictMessages() : []
+
+  const calendarCells = (): { date: Date; inMonth: boolean }[] => {
+    const y = calendarMonth.getFullYear()
+    const m = calendarMonth.getMonth()
+    const first = new Date(y, m, 1)
+    const startPad = (first.getDay() + 6) % 7
+    const cells: { date: Date; inMonth: boolean }[] = []
+    const total = 42
+    const startDate = new Date(y, m, 1 - startPad)
+    for (let i = 0; i < total; i++) {
+      const d = new Date(startDate)
+      d.setDate(startDate.getDate() + i)
+      cells.push({ date: d, inMonth: d.getMonth() === m })
+    }
+    return cells
+  }
+
+  const dayHasColleagueVacation = (day: Date): boolean =>
+    colleagueLeaveOverlappingDay(day).length > 0
+
+  const dayInSelectedRange = (day: Date): boolean => {
+    if (!formData.startDate || !formData.endDate) return false
+    const s = new Date(formData.startDate + 'T12:00:00')
+    const e = new Date(formData.endDate + 'T12:00:00')
+    const d = new Date(day.getFullYear(), day.getMonth(), day.getDate())
+    const d0 = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    const s0 = new Date(s.getFullYear(), s.getMonth(), s.getDate())
+    const e0 = new Date(e.getFullYear(), e.getMonth(), e.getDate())
+    return d0 >= s0 && d0 <= e0
+  }
+
+  const pickCalendarDay = (day: Date) => {
+    const iso = formatDateForInputLocal(day)
+    if (iso < today) return
+    if (!formData.startDate) {
+      setFormData(prev => ({ ...prev, startDate: iso, endDate: iso }))
+      return
+    }
+    if (formData.startDate === formData.endDate) {
+      if (iso === formData.startDate) return
+      const s = formData.startDate < iso ? formData.startDate : iso
+      const e = formData.startDate < iso ? iso : formData.startDate
+      setFormData(prev => ({ ...prev, startDate: s, endDate: e }))
+      return
+    }
+    setFormData(prev => ({ ...prev, startDate: iso, endDate: iso }))
+  }
 
   // Min-Datum für Datumseingaben (heute)
   const today = getTodayLocalDateString()
@@ -224,7 +326,9 @@ const VacationRequests: React.FC = () => {
           </div>
           <div className="stat">
             <span className="stat-value">{usedForAccount}</span>
-            <span className="stat-label">Genutzt</span>
+            <span className="stat-label" title="Genehmigter Urlaub laut Konto plus Ihre ausstehenden Urlaubsanträge">
+              Genutzt / reserviert
+            </span>
           </div>
           <div className="stat">
             <span className="stat-value">{totalVacationDays}</span>
@@ -277,6 +381,78 @@ const VacationRequests: React.FC = () => {
                 />
               </div>
             </div>
+
+          <div className="form-group vacation-calendar-nav">
+            <label>Kalender — Zeitraum antippen (erster Tag, dann letzter Tag; erneut tippen startet neu):</label>
+            <div className="vacation-cal-toolbar">
+              <button
+                type="button"
+                className="btn secondary-btn cal-nav-btn"
+                onClick={() =>
+                  setCalendarMonth(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))
+                }
+              >
+                ‹
+              </button>
+              <span className="vacation-cal-title">
+                {calendarMonth.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}
+              </span>
+              <button
+                type="button"
+                className="btn secondary-btn cal-nav-btn"
+                onClick={() =>
+                  setCalendarMonth(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))
+                }
+              >
+                ›
+              </button>
+            </div>
+            <div className="vacation-cal-weekdays">
+              {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(w => (
+                <span key={w} className="vacation-cal-wd">
+                  {w}
+                </span>
+              ))}
+            </div>
+            <div className="vacation-cal-grid">
+              {calendarCells().map(({ date, inMonth }, idx) => {
+                const iso = formatDateForInputLocal(date)
+                const disabled = iso < today
+                const overlap = dayHasColleagueVacation(date)
+                const inRange = dayInSelectedRange(date)
+                let cls = 'vacation-cal-cell'
+                if (!inMonth) cls += ' other-month'
+                if (disabled) cls += ' disabled'
+                if (overlap) cls += ' colleague-vacation'
+                if (inRange) cls += ' selected-range'
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={cls}
+                    disabled={disabled}
+                    onClick={() => pickCalendarDay(date)}
+                  >
+                    {date.getDate()}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="vacation-cal-legend">
+              <span className="legend-dot colleague" /> Kollegen mit Urlaub (genehmigt oder ausstehend) ·{' '}
+              <span className="legend-dot selected" /> Ihre Auswahl
+            </p>
+          </div>
+
+            {conflictMsgs.length > 0 && formData.type === 'vacation' && (
+              <div className="vacation-conflicts">
+                {conflictMsgs.map((msg, i) => (
+                  <p key={i} className="vacation-conflict-msg">
+                    {msg}
+                  </p>
+                ))}
+              </div>
+            )}
 
             {workingDays > 0 && (
               <div className={`working-days-info ${workingDays > remaining ? 'warning' : 'info'}`}>

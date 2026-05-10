@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore'
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 import { db, auth } from './firebaseConfig'
-import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest } from '../types'
+import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement } from '../types'
 import { formatDateForInputLocal } from '../utils/dateUtils'
 
 const isDevMode = typeof import.meta !== 'undefined' && !!import.meta.env?.DEV
@@ -1480,6 +1480,28 @@ class DataServiceClass {
           approvedAt: new Date(),
           updatedAt: new Date()
         })
+
+        if (leaveRequest.type === 'vacation' && leaveRequest.employeeId) {
+          const empRef = doc(db, 'employees', leaveRequest.employeeId)
+          const empSnap = await transaction.get(empRef)
+          if (empSnap.exists()) {
+            const emp = empSnap.data() as Employee
+            const vd = emp.vacationDays || {
+              total: 30,
+              used: 0,
+              year: new Date().getFullYear()
+            }
+            const add = Number(leaveRequest.workingDays) || 0
+            const newUsed = Math.max(0, (Number(vd.used) || 0) + add)
+            transaction.update(empRef, {
+              vacationDays: {
+                ...vd,
+                used: newUsed,
+                year: vd.year ?? new Date().getFullYear()
+              }
+            })
+          }
+        }
       })
     } catch (error) {
       console.error('Fehler beim Genehmigen des Urlaubsantrags:', error)
@@ -1491,10 +1513,40 @@ class DataServiceClass {
     await this.authReadyPromise
     try {
       const leaveRequestRef = doc(db, 'leaveRequests', id)
-      await updateDoc(leaveRequestRef, {
-        status: 'rejected',
-        rejectionReason,
-        updatedAt: new Date()
+      await runTransaction(db, async (transaction) => {
+        const leaveRequestDoc = await transaction.get(leaveRequestRef)
+        if (!leaveRequestDoc.exists()) {
+          throw new Error('Urlaubsantrag nicht gefunden')
+        }
+        const leaveRequest = leaveRequestDoc.data() as LeaveRequest
+
+        if (leaveRequest.status === 'approved' && leaveRequest.type === 'vacation' && leaveRequest.employeeId) {
+          const empRef = doc(db, 'employees', leaveRequest.employeeId)
+          const empSnap = await transaction.get(empRef)
+          if (empSnap.exists()) {
+            const emp = empSnap.data() as Employee
+            const vd = emp.vacationDays || {
+              total: 30,
+              used: 0,
+              year: new Date().getFullYear()
+            }
+            const sub = Number(leaveRequest.workingDays) || 0
+            const newUsed = Math.max(0, (Number(vd.used) || 0) - sub)
+            transaction.update(empRef, {
+              vacationDays: {
+                ...vd,
+                used: newUsed,
+                year: vd.year ?? new Date().getFullYear()
+              }
+            })
+          }
+        }
+
+        transaction.update(leaveRequestRef, {
+          status: 'rejected',
+          rejectionReason,
+          updatedAt: new Date()
+        })
       })
     } catch (error) {
       console.error('Fehler beim Ablehnen des Urlaubsantrags:', error)
@@ -1506,10 +1558,88 @@ class DataServiceClass {
     await this.authReadyPromise
     try {
       const leaveRequestRef = doc(db, 'leaveRequests', id)
-      await deleteDoc(leaveRequestRef)
+      await runTransaction(db, async (transaction) => {
+        const leaveRequestDoc = await transaction.get(leaveRequestRef)
+        if (!leaveRequestDoc.exists()) {
+          return
+        }
+        const leaveRequest = leaveRequestDoc.data() as LeaveRequest
+
+        if (leaveRequest.status === 'approved' && leaveRequest.type === 'vacation' && leaveRequest.employeeId) {
+          const empRef = doc(db, 'employees', leaveRequest.employeeId)
+          const empSnap = await transaction.get(empRef)
+          if (empSnap.exists()) {
+            const emp = empSnap.data() as Employee
+            const vd = emp.vacationDays || {
+              total: 30,
+              used: 0,
+              year: new Date().getFullYear()
+            }
+            const sub = Number(leaveRequest.workingDays) || 0
+            const newUsed = Math.max(0, (Number(vd.used) || 0) - sub)
+            transaction.update(empRef, {
+              vacationDays: {
+                ...vd,
+                used: newUsed,
+                year: vd.year ?? new Date().getFullYear()
+              }
+            })
+          }
+        }
+
+        transaction.delete(leaveRequestRef)
+      })
     } catch (error) {
       console.error('Fehler beim Löschen des Urlaubsantrags:', error)
       throw error
+    }
+  }
+
+  settlementDocId(employeeId: string, periodStart: string, periodEnd: string): string {
+    return `${employeeId}_${periodStart}_${periodEnd}`.replace(/\//g, '-')
+  }
+
+  async saveTimeReportSettlement(data: Omit<TimeReportSettlement, 'id' | 'settledAt'>): Promise<void> {
+    await this.authReadyPromise
+    try {
+      const id = this.settlementDocId(data.employeeId, data.periodStart, data.periodEnd)
+      const settlementRef = doc(db, 'timeReportSettlements', id)
+      await setDoc(settlementRef, {
+        ...data,
+        settledAt: new Date()
+      })
+
+      const empRef = doc(db, 'employees', data.employeeId)
+      const empSnap = await getDoc(empRef)
+      if (empSnap.exists()) {
+        const emp = empSnap.data() as Employee
+        const paid = Number(data.paidOutMinutes) || 0
+        if (emp.overtimeBalanceMinutes != null && typeof emp.overtimeBalanceMinutes === 'number') {
+          const next = Math.max(0, emp.overtimeBalanceMinutes - paid)
+          await updateDoc(empRef, { overtimeBalanceMinutes: next })
+        }
+      }
+    } catch (error) {
+      console.error('Fehler beim Speichern der Zeiterfassungs-Abrechnung:', error)
+      throw error
+    }
+  }
+
+  async getTimeReportSettlement(
+    employeeId: string,
+    periodStart: string,
+    periodEnd: string
+  ): Promise<TimeReportSettlement | null> {
+    await this.authReadyPromise
+    try {
+      const id = this.settlementDocId(employeeId, periodStart, periodEnd)
+      const settlementRef = doc(db, 'timeReportSettlements', id)
+      const snap = await getDoc(settlementRef)
+      if (!snap.exists()) return null
+      return { id: snap.id, ...snap.data() } as TimeReportSettlement
+    } catch (error) {
+      console.error('Fehler beim Laden der Zeiterfassungs-Abrechnung:', error)
+      return null
     }
   }
 
