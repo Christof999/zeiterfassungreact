@@ -1610,14 +1610,26 @@ class DataServiceClass {
 
   async saveTimeReportSettlement(data: Omit<TimeReportSettlement, 'id' | 'settledAt'>): Promise<void> {
     await this.authReadyPromise
+    const id = this.settlementDocId(data.employeeId, data.periodStart, data.periodEnd)
+    const settlementRef = doc(db, 'timeReportSettlements', id)
+
     try {
-      const id = this.settlementDocId(data.employeeId, data.periodStart, data.periodEnd)
-      const settlementRef = doc(db, 'timeReportSettlements', id)
       await setDoc(settlementRef, {
         ...data,
         settledAt: new Date()
       })
+    } catch (error: unknown) {
+      console.error('Fehler beim Speichern der Zeiterfassungs-Abrechnung:', error)
+      const code = (error as { code?: string })?.code
+      if (code === 'permission-denied') {
+        throw new Error(
+          'Keine Berechtigung für „timeReportSettlements“ in Firestore. Bitte in den Security Rules Lesen/Schreiben für angemeldete Nutzer erlauben (siehe Datei firestore-rules-timeReportSettlements.txt im Projekt).'
+        )
+      }
+      throw error
+    }
 
+    try {
       const empRef = doc(db, 'employees', data.employeeId)
       const empSnap = await getDoc(empRef)
       if (empSnap.exists()) {
@@ -1629,8 +1641,7 @@ class DataServiceClass {
         }
       }
     } catch (error) {
-      console.error('Fehler beim Speichern der Zeiterfassungs-Abrechnung:', error)
-      throw error
+      console.warn('Abrechnung gespeichert, aber Überstunden-Saldo am Mitarbeiter konnte nicht angepasst werden:', error)
     }
   }
 

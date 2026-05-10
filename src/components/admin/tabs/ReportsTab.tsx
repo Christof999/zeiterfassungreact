@@ -1045,6 +1045,10 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
   }
 
   const hasEdits = reportEntries.some(e => e.isEdited)
+  const settlementLinesPreview =
+    reportType === 'employee' && reportEntries.length > 0 ? buildSettlementLinesFromEntries() : []
+  const remainderHasTimeChange = settlementLinesPreview.some(l => l.rawMinutes !== l.correctedMinutes)
+  const remainderHasShortening = settlementLinesPreview.some(l => l.paidOutMinutes > 0)
   const isEmployeeReportEnabled = availableReportTypes.includes('employee')
   const isProjectReportEnabled = availableReportTypes.includes('project')
   const showReportTypeTabs = isEmployeeReportEnabled && isProjectReportEnabled
@@ -1184,10 +1188,25 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
               ) : employeeReportView === 'remainder' ? (
                 <div className="report-table-container">
                   {getRemainderLines().length === 0 ? (
-                    <p className="no-data">
-                      Keine positive Differenz (keine „Rest-Stunden“ gegenüber der Rohzeit). Passen Sie die Zeiten an
-                      oder speichern Sie eine Abrechnung mit gekürzten Stunden.
-                    </p>
+                    <div className="no-data remainder-empty-hint">
+                      {!remainderHasTimeChange && hasEdits ? (
+                        <p>
+                          Sie haben nur den <strong>Projektnamen</strong> angepasst — die Stempelzeiten sind unverändert.
+                          „Restliche Stunden“ erscheinen nur, wenn Sie <strong>Kommen, Gehen oder Pause</strong> so ändern,
+                          dass die berechnete Arbeitszeit <strong>kürzer</strong> wird als die gespeicherte Rohzeit.
+                        </p>
+                      ) : remainderHasTimeChange && !remainderHasShortening ? (
+                        <p>
+                          Die korrigierten Zeiten sind nirgends <strong>kürzer</strong> als die Rohzeit (z.&nbsp;B. nur
+                          verlängert oder weniger Pause). Dadurch gibt es keine abzutrennenden „Rest-Stunden“.
+                        </p>
+                      ) : (
+                        <p>
+                          Keine gekürzte Arbeitszeit gegenüber der Rohzeit. In der Ansicht „Volle Tabelle“ Kommen/Gehen/
+                          Pause anpassen, dann erneut „Restliche Stunden“ öffnen.
+                        </p>
+                      )}
+                    </div>
                   ) : (
                     <table className="report-table">
                       <thead>
