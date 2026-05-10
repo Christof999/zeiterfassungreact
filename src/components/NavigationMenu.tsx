@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import '../styles/NavigationMenu.css'
 
 interface NavigationMenuProps {
@@ -53,11 +54,18 @@ const NavigationMenu: React.FC<NavigationMenuProps> = ({ onLogout }) => {
         >
           ×
         </button>
-        <button 
+        <Link
+          to="/vacation"
+          className="nav-item btn primary-btn"
+          onClick={() => setIsOpen(false)}
+        >
+          Urlaubsanträge
+        </Link>
+        <button
           onClick={() => {
             setIsOpen(false)
             onLogout()
-          }} 
+          }}
           className="nav-item btn secondary-btn"
         >
           Abmelden
