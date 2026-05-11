@@ -700,6 +700,228 @@
   gap: var(--spacing-sm);
 }
 
+.vacation-main-subtabs {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
+  flex-wrap: wrap;
+}
+
+.subtab-btn {
+  padding: 10px 16px;
+  min-height: 40px;
+  border: 1.5px solid var(--border-color);
+  background: var(--card-background);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all var(--transition-base);
+}
+
+.subtab-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.subtab-btn.active {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: #fff;
+}
+
+.vacation-balance-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.balance-select-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  max-width: 420px;
+}
+
+.balance-select-row select {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  font-size: var(--font-size-sm);
+}
+
+.vacation-balance-stats.card-like {
+  padding: var(--spacing-lg);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-light);
+  background: var(--card-background);
+}
+
+.vacation-balance-stats h4 {
+  margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-base);
+}
+
+.vacation-balance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.balance-big {
+  display: block;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  line-height: 1.2;
+}
+
+.balance-num {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.balance-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.balance-section-title {
+  margin: 0;
+  font-size: var(--font-size-base);
+}
+
+.pending-inline-title {
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-light);
+}
+
+.vacation-approved-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.vacation-approved-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--light-color);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+}
+
+.vacation-approved-item .muted {
+  color: var(--text-secondary);
+}
+
+.leave-requests-list.compact .leave-request-card {
+  padding: var(--spacing-md);
+}
+
+.vacation-admin-toolbar {
+  margin-bottom: var(--spacing-lg);
+}
+
+.vacation-team-cal-panel {
+  max-width: 640px;
+}
+
+.vacation-team-cal-intro {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin: 0 0 var(--spacing-md);
+}
+
+.vacation-tab .admin-cal-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 6px;
+  cursor: default;
+  position: relative;
+}
+
+.vacation-tab .admin-cal-cell.team-cal-pending {
+  box-shadow: inset 0 0 0 2px rgba(255, 149, 0, 0.65);
+}
+
+.vacation-tab .admin-cal-cell.team-cal-approved {
+  box-shadow: inset 0 0 0 2px rgba(74, 124, 89, 0.55);
+}
+
+.admin-cal-day-num {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.admin-cal-chip {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.vacation-tab .admin-cal-legend {
+  margin-top: var(--spacing-md);
+}
+
+.legend-sample {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.team-cal-approved-sample {
+  box-shadow: inset 0 0 0 2px rgba(74, 124, 89, 0.75);
+}
+
+.team-cal-pending-sample {
+  box-shadow: inset 0 0 0 2px rgba(255, 149, 0, 0.85);
+}
+
+.modal-content.modal-wide {
+  max-width: 520px;
+  width: 92vw;
+}
+
+.vacation-tab .form-row-modal {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-md);
+}
+
+.admin-working-days-info {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-md);
+}
+
+.admin-leave-conflict-msg {
+  font-size: var(--font-size-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: var(--radius-md);
+  margin: var(--spacing-xs) 0;
+  line-height: 1.4;
+}
+
 .pending-badge {
   background: #ff9500;
   color: white;

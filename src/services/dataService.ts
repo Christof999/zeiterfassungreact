@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore'
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 import { db, auth } from './firebaseConfig'
-import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest } from '../types'
+import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement } from '../types'
 import { formatDateForInputLocal } from '../utils/dateUtils'
 
 const isDevMode = typeof import.meta !== 'undefined' && !!import.meta.env?.DEV
@@ -165,11 +165,19 @@ class DataServiceClass {
     return this.authReadyPromise
   }
 
+  /** Felder, die Mitarbeiter in der App-Session nicht sehen sollen (liegen nur in Firestore / Admin). */
+  private sanitizeEmployeeForClientSession(employee: Employee): Employee {
+    const { overtimeBalanceMinutes: _removed, ...rest } = employee
+    return rest as Employee
+  }
+
   // Employee Management
   async getCurrentUser(): Promise<Employee | null> {
     try {
       const savedUser = localStorage.getItem('lauffer_current_user')
-      return savedUser ? JSON.parse(savedUser) : null
+      if (!savedUser) return null
+      const parsed = JSON.parse(savedUser) as Employee
+      return this.sanitizeEmployeeForClientSession(parsed)
     } catch (error) {
       console.error('Fehler beim Laden des Benutzers:', error)
       return null
@@ -179,7 +187,8 @@ class DataServiceClass {
   setCurrentUser(user: Employee | null) {
     if (user) {
       const { password, ...safeUserData } = user
-      localStorage.setItem('lauffer_current_user', JSON.stringify(safeUserData))
+      const cleaned = this.sanitizeEmployeeForClientSession(safeUserData as Employee)
+      localStorage.setItem('lauffer_current_user', JSON.stringify(cleaned))
     } else {
       localStorage.removeItem('lauffer_current_user')
     }
@@ -202,7 +211,7 @@ class DataServiceClass {
         
         if (employee.password === password && employee.status === 'active') {
           const { password, ...employeeData } = employee
-          return employeeData as Employee
+          return this.sanitizeEmployeeForClientSession(employeeData as Employee)
         }
       }
       return null
@@ -1480,6 +1489,28 @@ class DataServiceClass {
           approvedAt: new Date(),
           updatedAt: new Date()
         })
+
+        if (leaveRequest.type === 'vacation' && leaveRequest.employeeId) {
+          const empRef = doc(db, 'employees', leaveRequest.employeeId)
+          const empSnap = await transaction.get(empRef)
+          if (empSnap.exists()) {
+            const emp = empSnap.data() as Employee
+            const vd = emp.vacationDays || {
+              total: 30,
+              used: 0,
+              year: new Date().getFullYear()
+            }
+            const add = Number(leaveRequest.workingDays) || 0
+            const newUsed = Math.max(0, (Number(vd.used) || 0) + add)
+            transaction.update(empRef, {
+              vacationDays: {
+                ...vd,
+                used: newUsed,
+                year: vd.year ?? new Date().getFullYear()
+              }
+            })
+          }
+        }
       })
     } catch (error) {
       console.error('Fehler beim Genehmigen des Urlaubsantrags:', error)
@@ -1491,10 +1522,40 @@ class DataServiceClass {
     await this.authReadyPromise
     try {
       const leaveRequestRef = doc(db, 'leaveRequests', id)
-      await updateDoc(leaveRequestRef, {
-        status: 'rejected',
-        rejectionReason,
-        updatedAt: new Date()
+      await runTransaction(db, async (transaction) => {
+        const leaveRequestDoc = await transaction.get(leaveRequestRef)
+        if (!leaveRequestDoc.exists()) {
+          throw new Error('Urlaubsantrag nicht gefunden')
+        }
+        const leaveRequest = leaveRequestDoc.data() as LeaveRequest
+
+        if (leaveRequest.status === 'approved' && leaveRequest.type === 'vacation' && leaveRequest.employeeId) {
+          const empRef = doc(db, 'employees', leaveRequest.employeeId)
+          const empSnap = await transaction.get(empRef)
+          if (empSnap.exists()) {
+            const emp = empSnap.data() as Employee
+            const vd = emp.vacationDays || {
+              total: 30,
+              used: 0,
+              year: new Date().getFullYear()
+            }
+            const sub = Number(leaveRequest.workingDays) || 0
+            const newUsed = Math.max(0, (Number(vd.used) || 0) - sub)
+            transaction.update(empRef, {
+              vacationDays: {
+                ...vd,
+                used: newUsed,
+                year: vd.year ?? new Date().getFullYear()
+              }
+            })
+          }
+        }
+
+        transaction.update(leaveRequestRef, {
+          status: 'rejected',
+          rejectionReason,
+          updatedAt: new Date()
+        })
       })
     } catch (error) {
       console.error('Fehler beim Ablehnen des Urlaubsantrags:', error)
@@ -1506,10 +1567,99 @@ class DataServiceClass {
     await this.authReadyPromise
     try {
       const leaveRequestRef = doc(db, 'leaveRequests', id)
-      await deleteDoc(leaveRequestRef)
+      await runTransaction(db, async (transaction) => {
+        const leaveRequestDoc = await transaction.get(leaveRequestRef)
+        if (!leaveRequestDoc.exists()) {
+          return
+        }
+        const leaveRequest = leaveRequestDoc.data() as LeaveRequest
+
+        if (leaveRequest.status === 'approved' && leaveRequest.type === 'vacation' && leaveRequest.employeeId) {
+          const empRef = doc(db, 'employees', leaveRequest.employeeId)
+          const empSnap = await transaction.get(empRef)
+          if (empSnap.exists()) {
+            const emp = empSnap.data() as Employee
+            const vd = emp.vacationDays || {
+              total: 30,
+              used: 0,
+              year: new Date().getFullYear()
+            }
+            const sub = Number(leaveRequest.workingDays) || 0
+            const newUsed = Math.max(0, (Number(vd.used) || 0) - sub)
+            transaction.update(empRef, {
+              vacationDays: {
+                ...vd,
+                used: newUsed,
+                year: vd.year ?? new Date().getFullYear()
+              }
+            })
+          }
+        }
+
+        transaction.delete(leaveRequestRef)
+      })
     } catch (error) {
       console.error('Fehler beim Löschen des Urlaubsantrags:', error)
       throw error
+    }
+  }
+
+  settlementDocId(employeeId: string, periodStart: string, periodEnd: string): string {
+    return `${employeeId}_${periodStart}_${periodEnd}`.replace(/\//g, '-')
+  }
+
+  async saveTimeReportSettlement(data: Omit<TimeReportSettlement, 'id' | 'settledAt'>): Promise<void> {
+    await this.authReadyPromise
+    const id = this.settlementDocId(data.employeeId, data.periodStart, data.periodEnd)
+    const settlementRef = doc(db, 'timeReportSettlements', id)
+
+    try {
+      await setDoc(settlementRef, {
+        ...data,
+        settledAt: new Date()
+      })
+    } catch (error: unknown) {
+      console.error('Fehler beim Speichern der Zeiterfassungs-Abrechnung:', error)
+      const code = (error as { code?: string })?.code
+      if (code === 'permission-denied') {
+        throw new Error(
+          'Keine Berechtigung für „timeReportSettlements“ in Firestore. Bitte in den Security Rules Lesen/Schreiben für angemeldete Nutzer erlauben (siehe Datei firestore-rules-timeReportSettlements.txt im Projekt).'
+        )
+      }
+      throw error
+    }
+
+    try {
+      const empRef = doc(db, 'employees', data.employeeId)
+      const empSnap = await getDoc(empRef)
+      if (empSnap.exists()) {
+        const emp = empSnap.data() as Employee
+        const paid = Number(data.paidOutMinutes) || 0
+        if (emp.overtimeBalanceMinutes != null && typeof emp.overtimeBalanceMinutes === 'number') {
+          const next = Math.max(0, emp.overtimeBalanceMinutes - paid)
+          await updateDoc(empRef, { overtimeBalanceMinutes: next })
+        }
+      }
+    } catch (error) {
+      console.warn('Abrechnung gespeichert, aber Überstunden-Saldo am Mitarbeiter konnte nicht angepasst werden:', error)
+    }
+  }
+
+  async getTimeReportSettlement(
+    employeeId: string,
+    periodStart: string,
+    periodEnd: string
+  ): Promise<TimeReportSettlement | null> {
+    await this.authReadyPromise
+    try {
+      const id = this.settlementDocId(employeeId, periodStart, periodEnd)
+      const settlementRef = doc(db, 'timeReportSettlements', id)
+      const snap = await getDoc(settlementRef)
+      if (!snap.exists()) return null
+      return { id: snap.id, ...snap.data() } as TimeReportSettlement
+    } catch (error) {
+      console.error('Fehler beim Laden der Zeiterfassungs-Abrechnung:', error)
+      return null
     }
   }
 

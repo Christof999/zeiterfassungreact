@@ -13,8 +13,7 @@ const VacationRequests: React.FC = () => {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
-  
-  // Formular-State
+
   const [formData, setFormData] = useState({
     startDate: '',
     endDate: '',
@@ -28,7 +27,6 @@ const VacationRequests: React.FC = () => {
     loadData()
   }, [])
 
-  // Arbeitstage berechnen wenn Datum sich ändert
   useEffect(() => {
     if (formData.startDate && formData.endDate) {
       const start = new Date(formData.startDate)
@@ -55,7 +53,6 @@ const VacationRequests: React.FC = () => {
       setCurrentUser(user)
 
       const requests = await DataService.getLeaveRequestsByEmployee(user.id!)
-      // Sortieren nach Erstellungsdatum (neueste zuerst)
       requests.sort((a, b) => {
         const dateA = a.createdAt?.toDate?.() || new Date(a.createdAt)
         const dateB = b.createdAt?.toDate?.() || new Date(b.createdAt)
@@ -72,9 +69,9 @@ const VacationRequests: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!currentUser) return
-    
+
     if (new Date(formData.endDate) < new Date(formData.startDate)) {
       toast.error('Das Enddatum muss nach dem Startdatum liegen')
       return
@@ -110,7 +107,7 @@ const VacationRequests: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Möchten Sie diesen Antrag wirklich löschen?')) return
-    
+
     try {
       await DataService.deleteLeaveRequest(id)
       toast.success('Antrag gelöscht')
@@ -122,11 +119,16 @@ const VacationRequests: React.FC = () => {
 
   const getTypeLabel = (type: LeaveRequest['type']) => {
     switch (type) {
-      case 'vacation': return 'Urlaub'
-      case 'sick': return 'Krankheit'
-      case 'special': return 'Sonderurlaub'
-      case 'unpaid': return 'Unbezahlt'
-      default: return type
+      case 'vacation':
+        return 'Urlaub'
+      case 'sick':
+        return 'Krankheit'
+      case 'special':
+        return 'Sonderurlaub'
+      case 'unpaid':
+        return 'Unbezahlt'
+      default:
+        return type
     }
   }
 
@@ -155,45 +157,19 @@ const VacationRequests: React.FC = () => {
     return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
   }
 
-  // Urlaubskonto berechnen:
-  // - "Genutzt" (Basis) kommt aus dem hinterlegten Urlaubskonto
-  // - zusätzlich werden bereits genehmigte, zukünftige Urlaubstage im aktuellen Jahr reserviert
   const currentYear = new Date().getFullYear()
   const vacationAccount = currentUser?.vacationDays || { total: 30, used: 0, year: currentYear }
   const totalVacationDays = Number(vacationAccount.total || 30)
   const takenVacationDays = Number(vacationAccount.used || 0)
-  const todayDate = new Date()
-  todayDate.setHours(0, 0, 0, 0)
 
-  const approvedPlannedVacationDays = leaveRequests.reduce((sum, request) => {
-    if (request.type !== 'vacation' || request.status !== 'approved') {
-      return sum
-    }
-
-    const startDate = toDate(request.startDate)
-    const endDate = toDate(request.endDate)
-    if (!startDate || !endDate) {
-      return sum
-    }
-
-    const yearStart = new Date(currentYear, 0, 1)
-    const yearEnd = new Date(currentYear, 11, 31)
-
-    const rangeStart = startDate > yearStart ? startDate : yearStart
-    const effectiveStart = rangeStart > todayDate ? rangeStart : todayDate
-    const rangeEnd = endDate < yearEnd ? endDate : yearEnd
-
-    if (rangeEnd < effectiveStart) {
-      return sum
-    }
-
-    return sum + DataService.calculateWorkingDays(effectiveStart, rangeEnd)
+  const ownPendingVacationDays = leaveRequests.reduce((sum, request) => {
+    if (request.type !== 'vacation' || request.status !== 'pending') return sum
+    return sum + (Number(request.workingDays) || 0)
   }, 0)
 
-  const usedForAccount = takenVacationDays + approvedPlannedVacationDays
+  const usedForAccount = takenVacationDays + ownPendingVacationDays
   const remaining = Math.max(0, totalVacationDays - usedForAccount)
 
-  // Min-Datum für Datumseingaben (heute)
   const today = getTodayLocalDateString()
 
   if (isLoading) {
@@ -207,14 +183,13 @@ const VacationRequests: React.FC = () => {
   return (
     <div className="vacation-container">
       <header className="vacation-header">
-        <button onClick={() => navigate('/time-tracking')} className="back-btn">
+        <button type="button" onClick={() => navigate('/time-tracking')} className="back-btn">
           Zurück
         </button>
         <h1>Urlaubsanträge</h1>
         <ThemeToggle variant="icon" className="vacation-header-theme-toggle" />
       </header>
 
-      {/* Urlaubskonto */}
       <div className="vacation-account card">
         <h3>Ihr Urlaubskonto {currentYear}</h3>
         <div className="vacation-stats">
@@ -224,7 +199,12 @@ const VacationRequests: React.FC = () => {
           </div>
           <div className="stat">
             <span className="stat-value">{usedForAccount}</span>
-            <span className="stat-label">Genutzt</span>
+            <span
+              className="stat-label"
+              title="Genehmigter Urlaub laut Konto plus Ihre ausstehenden Urlaubsanträge"
+            >
+              Genutzt / reserviert
+            </span>
           </div>
           <div className="stat">
             <span className="stat-value">{totalVacationDays}</span>
@@ -232,28 +212,30 @@ const VacationRequests: React.FC = () => {
           </div>
         </div>
         <div className="vacation-progress">
-          <div 
-            className="vacation-progress-bar" 
-            style={{ width: `${totalVacationDays > 0 ? Math.min(100, (usedForAccount / totalVacationDays) * 100) : 0}%` }}
+          <div
+            className="vacation-progress-bar"
+            style={{
+              width: `${totalVacationDays > 0 ? Math.min(100, (usedForAccount / totalVacationDays) * 100) : 0}%`
+            }}
           />
         </div>
       </div>
 
-      {/* Neuen Antrag Button */}
       {!showForm && (
-        <button onClick={() => setShowForm(true)} className="btn primary-btn new-request-btn">
+        <button type="button" onClick={() => setShowForm(true)} className="btn primary-btn new-request-btn">
           Neuen Antrag stellen
         </button>
       )}
 
-      {/* Antragsformular */}
       {showForm && (
         <div className="vacation-form card">
           <div className="form-header">
             <h3>Neuer Urlaubsantrag</h3>
-            <button onClick={() => setShowForm(false)} className="close-btn">×</button>
+            <button type="button" onClick={() => setShowForm(false)} className="close-btn">
+              ×
+            </button>
           </div>
-          
+
           <form onSubmit={handleSubmit}>
             <div className="form-row">
               <div className="form-group">
@@ -261,7 +243,7 @@ const VacationRequests: React.FC = () => {
                 <input
                   type="date"
                   value={formData.startDate}
-                  onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                  onChange={e => setFormData({ ...formData, startDate: e.target.value })}
                   min={today}
                   required
                 />
@@ -271,7 +253,7 @@ const VacationRequests: React.FC = () => {
                 <input
                   type="date"
                   value={formData.endDate}
-                  onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                  onChange={e => setFormData({ ...formData, endDate: e.target.value })}
                   min={formData.startDate || today}
                   required
                 />
@@ -281,7 +263,9 @@ const VacationRequests: React.FC = () => {
             {workingDays > 0 && (
               <div className={`working-days-info ${workingDays > remaining ? 'warning' : 'info'}`}>
                 {workingDays > remaining ? (
-                  <>{workingDays} Arbeitstage beantragt, aber nur {remaining} verfügbar</>
+                  <>
+                    {workingDays} Arbeitstage beantragt, aber nur {remaining} verfügbar
+                  </>
                 ) : (
                   <>{workingDays} Arbeitstage</>
                 )}
@@ -292,7 +276,9 @@ const VacationRequests: React.FC = () => {
               <label>Art des Urlaubs:</label>
               <select
                 value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value as LeaveRequest['type'] })}
+                onChange={e =>
+                  setFormData({ ...formData, type: e.target.value as LeaveRequest['type'] })
+                }
               >
                 <option value="vacation">Urlaub</option>
                 <option value="special">Sonderurlaub</option>
@@ -304,7 +290,7 @@ const VacationRequests: React.FC = () => {
               <label>Grund / Bemerkung (optional):</label>
               <textarea
                 value={formData.reason}
-                onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                onChange={e => setFormData({ ...formData, reason: e.target.value })}
                 placeholder="z.B. Familienfeier, Umzug..."
                 rows={3}
               />
@@ -322,44 +308,40 @@ const VacationRequests: React.FC = () => {
         </div>
       )}
 
-      {/* Liste der Anträge */}
       <div className="requests-list">
         <h3>Meine Anträge</h3>
-        
+
         {leaveRequests.length === 0 ? (
           <p className="no-data">Noch keine Urlaubsanträge vorhanden</p>
         ) : (
-          leaveRequests.map((request) => (
+          leaveRequests.map(request => (
             <div key={request.id} className={`request-card card status-${request.status}`}>
               <div className="request-header">
                 <span className="request-type">{getTypeLabel(request.type)}</span>
                 {getStatusBadge(request.status)}
               </div>
-              
+
               <div className="request-dates">
                 <span className="date-range">
                   {formatDate(request.startDate)} - {formatDate(request.endDate)}
                 </span>
                 <span className="days-count">{request.workingDays} Arbeitstage</span>
               </div>
-              
-              {request.reason && (
-                <p className="request-reason">{request.reason}</p>
-              )}
-              
+
+              {request.reason && <p className="request-reason">{request.reason}</p>}
+
               {request.status === 'rejected' && request.rejectionReason && (
                 <p className="rejection-reason">
                   <strong>Ablehnungsgrund:</strong> {request.rejectionReason}
                 </p>
               )}
-              
+
               <div className="request-footer">
-                <span className="request-date">
-                  Eingereicht am {formatDate(request.createdAt)}
-                </span>
+                <span className="request-date">Eingereicht am {formatDate(request.createdAt)}</span>
                 {request.status === 'pending' && (
-                  <button 
-                    onClick={() => handleDelete(request.id!)} 
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(request.id!)}
                     className="delete-btn"
                     title="Antrag löschen"
                   >

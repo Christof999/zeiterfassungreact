@@ -1,0 +1,21 @@
+Firestore Security Rules — Collection „timeReportSettlements“
+==============================================================
+
+Die Zeiterfassungs-Abrechnung speichert Dokumente unter:
+
+  timeReportSettlements/{dokumentId}
+
+Die App nutzt Firebase Anonymous Auth (request.auth != null nach erfolgreicher Anmeldung).
+
+Fügen Sie in Ihrer bestehenden firestore.rules INNERHALB von
+  match /databases/{database}/documents { ... }
+folgenden Block ein (nicht die gesamte Datei ersetzen, sondern ergänzen):
+
+    match /timeReportSettlements/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+Alternativ (restriktiver): nur wenn Sie später echte Admin-Claims nutzen.
+
+Nach Änderung deployen:
+  firebase deploy --only firestore:rules

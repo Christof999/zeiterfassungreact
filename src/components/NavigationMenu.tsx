@@ -54,18 +54,18 @@ const NavigationMenu: React.FC<NavigationMenuProps> = ({ onLogout }) => {
         >
           ×
         </button>
-        <Link 
-          to="/vacation" 
-          className="nav-item btn primary-btn" 
+        <Link
+          to="/vacation"
+          className="nav-item btn primary-btn"
           onClick={() => setIsOpen(false)}
         >
           Urlaubsanträge
         </Link>
-        <button 
+        <button
           onClick={() => {
             setIsOpen(false)
             onLogout()
-          }} 
+          }}
           className="nav-item btn secondary-btn"
         >
           Abmelden
