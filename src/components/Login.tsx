@@ -10,21 +10,15 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isCheckingApp, setIsCheckingApp] = useState(true)
   const navigate = useNavigate()
 
   useEffect(() => {
+    // Prüfe, ob bereits ein Benutzer angemeldet ist
     const checkLoggedIn = async () => {
-      const appActive = await DataService.isEmployeeAppActive()
-      if (!appActive) {
-        navigate('/app-inactive', { replace: true })
-        return
-      }
       const currentUser = await DataService.getCurrentUser()
       if (currentUser && currentUser.id) {
         navigate('/time-tracking')
       }
-      setIsCheckingApp(false)
     }
     checkLoggedIn()
   }, [navigate])
@@ -35,12 +29,6 @@ const Login: React.FC = () => {
     setIsLoading(true)
 
     try {
-      const appActive = await DataService.isEmployeeAppActive()
-      if (!appActive) {
-        navigate('/app-inactive', { replace: true })
-        return
-      }
-
       const user = await DataService.authenticateEmployee(username.trim(), password)
       
       if (user && user.id) {
@@ -58,10 +46,6 @@ const Login: React.FC = () => {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  if (isCheckingApp) {
-    return <div className="loading">Lade...</div>
   }
 
   return (
