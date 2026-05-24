@@ -1,3 +1,10 @@
+/** Globale App-Einstellungen (Firestore: appSettings/global). */
+export interface AppSettings {
+  /** false = Mitarbeiter-App gesperrt, Admin weiter nutzbar. */
+  employeeAppActive?: boolean
+  updatedAt?: Date
+}
+
 export interface Employee {
   id?: string
   username: string

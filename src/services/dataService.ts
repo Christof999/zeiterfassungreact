@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore'
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 import { db, auth } from './firebaseConfig'
-import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement } from '../types'
+import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement, AppSettings } from '../types'
 import { formatDateForInputLocal } from '../utils/dateUtils'
 
 const isDevMode = typeof import.meta !== 'undefined' && !!import.meta.env?.DEV
@@ -198,8 +198,67 @@ class DataServiceClass {
     localStorage.removeItem('lauffer_current_user')
   }
 
+  private static readonly APP_SETTINGS_DOC_ID = 'global'
+
+  /** Mitarbeiter-App aktiv? Fehlt das Dokument → aktiv (Rückwärtskompatibilität). */
+  async isEmployeeAppActive(): Promise<boolean> {
+    await this.authReadyPromise
+    try {
+      const settingsRef = doc(db, 'appSettings', DataServiceClass.APP_SETTINGS_DOC_ID)
+      const snap = await getDoc(settingsRef)
+      if (!snap.exists()) return true
+      const data = snap.data() as AppSettings
+      return data.employeeAppActive !== false
+    } catch (error) {
+      console.error('Fehler beim Laden der App-Einstellungen:', error)
+      return true
+    }
+  }
+
+  async getAppSettings(): Promise<AppSettings> {
+    await this.authReadyPromise
+    try {
+      const settingsRef = doc(db, 'appSettings', DataServiceClass.APP_SETTINGS_DOC_ID)
+      const snap = await getDoc(settingsRef)
+      if (!snap.exists()) {
+        return { employeeAppActive: true }
+      }
+      const data = snap.data() as AppSettings
+      const updatedAtRaw = (data as { updatedAt?: unknown }).updatedAt
+      const updatedAt =
+        updatedAtRaw instanceof Timestamp
+          ? updatedAtRaw.toDate()
+          : updatedAtRaw instanceof Date
+            ? updatedAtRaw
+            : (updatedAtRaw as { toDate?: () => Date })?.toDate?.()
+      return {
+        employeeAppActive: data.employeeAppActive !== false,
+        updatedAt
+      }
+    } catch (error) {
+      console.error('Fehler beim Laden der App-Einstellungen:', error)
+      return { employeeAppActive: true }
+    }
+  }
+
+  async setEmployeeAppActive(active: boolean): Promise<void> {
+    await this.authReadyPromise
+    const settingsRef = doc(db, 'appSettings', DataServiceClass.APP_SETTINGS_DOC_ID)
+    await setDoc(
+      settingsRef,
+      {
+        employeeAppActive: active,
+        updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    )
+  }
+
   async authenticateEmployee(username: string, password: string): Promise<Employee | null> {
     await this.authReadyPromise
+    if (!(await this.isEmployeeAppActive())) {
+      return null
+    }
     try {
       const employeesRef = collection(db, 'employees')
       const q = query(employeesRef, where('username', '==', username), limit(1))

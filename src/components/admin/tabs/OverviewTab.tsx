@@ -16,6 +16,8 @@ const OverviewTab: React.FC = () => {
   }>>([])
   const [isLoading, setIsLoading] = useState(true)
   const [clockingOut, setClockingOut] = useState<string | null>(null)
+  const [employeeAppActive, setEmployeeAppActive] = useState(true)
+  const [isSavingAppStatus, setIsSavingAppStatus] = useState(false)
 
   useEffect(() => {
     loadDashboardData()
@@ -31,12 +33,15 @@ const OverviewTab: React.FC = () => {
 
   const loadDashboardData = async () => {
     try {
-      const [currentTimeEntries, projects, todaysEntries, employees] = await Promise.all([
+      const [currentTimeEntries, projects, todaysEntries, employees, appSettings] = await Promise.all([
         DataService.getCurrentTimeEntries(),
         DataService.getAllProjects(),
         DataService.getTodaysTimeEntries(),
-        DataService.getAllEmployees()
+        DataService.getAllEmployees(),
+        DataService.getAppSettings()
       ])
+
+      setEmployeeAppActive(appSettings.employeeAppActive !== false)
 
       // Eingestempelte Mitarbeiter zählen
       const uniqueClockedInEmployees = new Set(currentTimeEntries.map(entry => entry.employeeId))
@@ -78,6 +83,29 @@ const OverviewTab: React.FC = () => {
     }>
 
     setLiveActivities(activities)
+  }
+
+  const handleToggleEmployeeApp = async () => {
+    const nextActive = !employeeAppActive
+    const confirmMessage = nextActive
+      ? 'Mitarbeiter-App wieder für alle freischalten?'
+      : 'Mitarbeiter-App deaktivieren? Mitarbeiter sehen dann nur den Hinweis „Die App ist inaktiv“. Der Admin-Bereich bleibt erreichbar.'
+
+    if (!confirm(confirmMessage)) return
+
+    setIsSavingAppStatus(true)
+    try {
+      await DataService.setEmployeeAppActive(nextActive)
+      setEmployeeAppActive(nextActive)
+      toast.success(
+        nextActive ? 'Mitarbeiter-App wurde aktiviert.' : 'Mitarbeiter-App wurde deaktiviert.'
+      )
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unbekannter Fehler'
+      toast.error('Einstellung konnte nicht gespeichert werden: ' + message)
+    } finally {
+      setIsSavingAppStatus(false)
+    }
   }
 
   // Mitarbeiter ausstempeln (Admin-Funktion)
@@ -132,6 +160,29 @@ const OverviewTab: React.FC = () => {
   return (
     <div className="overview-tab">
       <h3>Übersicht</h3>
+
+      <div className="app-status-card">
+        <div className="app-status-card-text">
+          <h4>Mitarbeiter-App</h4>
+          <p>
+            {employeeAppActive
+              ? 'Mitarbeiter können sich anmelden und die Zeiterfassung nutzen.'
+              : 'Mitarbeiter sehen beim Login „Die App ist inaktiv“. Der Admin-Bereich bleibt aktiv.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          className={`btn ${employeeAppActive ? 'secondary-btn' : 'primary-btn'}`}
+          onClick={handleToggleEmployeeApp}
+          disabled={isSavingAppStatus}
+        >
+          {isSavingAppStatus
+            ? 'Speichern…'
+            : employeeAppActive
+              ? 'App für Mitarbeiter deaktivieren'
+              : 'App für Mitarbeiter aktivieren'}
+        </button>
+      </div>
       
       <div className="dashboard-stats">
         <div className="stat-card">
