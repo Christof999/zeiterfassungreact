@@ -275,6 +275,27 @@
   }
 }
 
+@media (max-width: 768px) {
+  .time-tracking-container.is-clocked-in .clock-out-form {
+    padding-bottom: calc(260px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .time-tracking-container.is-clocked-in .clock-out-buttons {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 90;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: var(--spacing-md) var(--spacing-md) max(var(--spacing-md), env(safe-area-inset-bottom, 0px));
+    background: var(--card-background);
+    border-top: 1px solid var(--border-color);
+    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.12);
+    box-sizing: border-box;
+  }
+}
+
 @media (max-width: 480px) {
   .clock-out-form {
     padding: var(--spacing-lg);

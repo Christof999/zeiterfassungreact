@@ -169,7 +169,9 @@ const TimeTracking: React.FC = () => {
   }
 
   return (
-    <div className="time-tracking-container">
+    <div
+      className={`time-tracking-container${currentTimeEntry ? ' is-clocked-in' : ''}`}
+    >
       <header className="time-tracking-header">
         <div className="time-tracking-logo">
           <img 
