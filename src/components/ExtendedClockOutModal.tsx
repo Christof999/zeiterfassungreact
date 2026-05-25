@@ -4,6 +4,7 @@ import type { TimeEntry, Vehicle } from '../types'
 import PhotoUpload, { type PhotoUploadItem } from './PhotoUpload'
 import { VehicleBookingFormFields } from './VehicleBookingFormFields'
 import { toast } from './ToastContainer'
+import { toFileUploadRef } from '../utils/fileUploadRef'
 import { getTodayLocalDateString } from '../utils/dateUtils'
 import '../styles/Modal.css'
 
@@ -163,8 +164,8 @@ const ExtendedClockOutModal: React.FC<ExtendedClockOutModalProps> = ({
       await DataService.updateTimeEntry(timeEntry.id, {
         sitePhotoUploads: sitePhotoObjects.map(u => u.id),
         documentPhotoUploads: documentPhotoObjects.map(u => u.id),
-        sitePhotos: sitePhotoObjects,
-        documents: documentPhotoObjects,
+        sitePhotos: sitePhotoObjects.map(toFileUploadRef),
+        documents: documentPhotoObjects.map(toFileUploadRef),
         hasDocumentation:
           sitePhotoObjects.length > 0 ||
           documentPhotoObjects.length > 0 ||

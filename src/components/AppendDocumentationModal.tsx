@@ -5,6 +5,7 @@ import PhotoUpload, { type PhotoUploadItem } from './PhotoUpload'
 import SaveProgressOverlay from './SaveProgressOverlay'
 import { VehicleBookingFormFields } from './VehicleBookingFormFields'
 import { uploadPhotoItemsForTimeEntry } from '../utils/uploadEntryPhotos'
+import { toFileUploadRef } from '../utils/fileUploadRef'
 import { toast } from './ToastContainer'
 import { formatDateForInputLocal } from '../utils/dateUtils'
 import '../styles/Modal.css'
@@ -94,7 +95,7 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
 
   const mergeFileList = (existing: unknown, additions: FileUpload[]): unknown[] => {
     const base = Array.isArray(existing) ? [...existing] : []
-    return [...base, ...additions]
+    return [...base, ...additions.map(toFileUploadRef)]
   }
 
   const mergeIdList = (existing: unknown, newIds: string[]): string[] => {

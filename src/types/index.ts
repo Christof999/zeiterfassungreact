@@ -59,8 +59,11 @@ export interface TimeEntry {
   isVacationDay?: boolean
   liveDocumentation?: Array<{
     notes: string
-    images: any[]
-    documents: any[]
+    /** Legacy: volle Objekte — nicht mehr beim Speichern befüllen */
+    images?: any[]
+    documents?: any[]
+    imageIds?: string[]
+    documentIds?: string[]
     photoCount: number
     documentCount: number
     addedBy: string

@@ -66,6 +66,12 @@ function collectFileReferenceIds(value: unknown, into: Set<string>, depth = 0): 
       if (typeof v === 'string' && v.trim() && !isPlaceholderFileUploadId(v.trim())) into.add(v.trim())
       if (typeof v === 'number' && Number.isFinite(v)) into.add(String(v))
     }
+    for (const key of ['imageIds', 'documentIds']) {
+      const arr = o[key]
+      if (Array.isArray(arr)) {
+        arr.forEach((id) => collectFileReferenceIds(id, into, depth + 1))
+      }
+    }
     for (const [k, v] of Object.entries(o)) {
       if (k === 'notes' || k === 'imageComment' || k === 'addedByName' || k === 'base64Data' || k === 'mimeType') {
         continue
@@ -869,8 +875,7 @@ class DataServiceClass {
         uploadTime: uploadDoc.data()?.uploadTime || new Date(),
         notes,
         imageComment: comment,
-        mimeType: String(saved.mimeType || ''),
-        base64Data: saved.base64Data ? String(saved.base64Data) : undefined
+        mimeType: String(saved.mimeType || '')
       } as FileUpload
     } catch (error) {
       console.error('Fehler beim Hochladen der Datei:', error)
@@ -1017,8 +1022,19 @@ class DataServiceClass {
         throw new Error('Zeiteintrag nicht gefunden')
       }
 
+      // Nur IDs + Text — keine Bilddaten im timeEntry (Firestore-Max. 1 MiB pro Dokument)
       const newDocumentation = {
-        ...documentationData,
+        notes: documentationData.notes || '',
+        photoCount: documentationData.photoCount,
+        documentCount: documentationData.documentCount,
+        addedBy: documentationData.addedBy,
+        addedByName: documentationData.addedByName,
+        imageIds: (documentationData.images || [])
+          .map((img: { id?: string }) => img?.id)
+          .filter((id): id is string => !!id),
+        documentIds: (documentationData.documents || [])
+          .map((doc: { id?: string }) => doc?.id)
+          .filter((id): id is string => !!id),
         timestamp: Timestamp.now()
       }
 
