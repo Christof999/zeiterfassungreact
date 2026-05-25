@@ -70,6 +70,9 @@ function collectFileReferenceIds(value: unknown, into: Set<string>, depth = 0): 
   }
 }
 
+/** Firestore-Maximum pro String-Feld (base64Data) — etwas Puffer unter 1.048.487 Bytes */
+const FIRESTORE_MAX_BASE64_BYTES = 1_000_000
+
 class DataServiceClass {
   private authReadyPromise: Promise<void>
 
@@ -758,16 +761,10 @@ class DataServiceClass {
   ): Promise<FileUpload> {
     await this.authReadyPromise
     try {
-      const isDocumentUpload =
-        type === 'invoice' || type === 'delivery_note' || type === 'document'
-      const quality = isDocumentUpload ? 0.92 : 0.82
-      const maxWidth = isDocumentUpload ? 2400 : 1600
-      const compressedFile = await this.compressImage(file, quality, maxWidth)
-      
-      // Konvertiere zu Base64
-      const base64DataUrl = await this.fileToBase64(compressedFile)
-      const base64String = base64DataUrl.split(',')[1]
-      const mimeType = base64DataUrl.split(',')[0].split(':')[1].split(';')[0]
+      const { base64: base64String, mimeType } = await this.compressImageForFirestoreUpload(
+        file,
+        type
+      )
 
       // Speichere in Firestore
       const fileUploadsRef = collection(db, 'fileUploads')
@@ -810,7 +807,68 @@ class DataServiceClass {
     }
   }
 
-  private async compressImage(file: File, quality: number, maxWidth: number): Promise<File> {
+  private isDocumentFileType(type: string): boolean {
+    return type === 'invoice' || type === 'delivery_note' || type === 'document'
+  }
+
+  private async fileToBase64Parts(file: File): Promise<{ base64: string; mimeType: string }> {
+    const dataUrl = await this.fileToBase64(file)
+    const base64 = dataUrl.split(',')[1] || ''
+    const mimeType =
+      dataUrl.split(',')[0]?.split(':')[1]?.split(';')[0] || file.type || 'image/jpeg'
+    return { base64, mimeType }
+  }
+
+  /**
+   * Komprimiert so stark wie nötig, damit base64Data in Firestore passt (~1 MiB pro Feld).
+   * Startet mit hoher Qualität und reduziert schrittweise Breite/Qualität.
+   */
+  private async compressImageForFirestoreUpload(
+    file: File,
+    type: string
+  ): Promise<{ base64: string; mimeType: string }> {
+    const isDocument = this.isDocumentFileType(type)
+    let quality = isDocument ? 0.88 : 0.8
+    let maxWidth = isDocument ? 1800 : 1400
+    const minQuality = 0.42
+    const minWidth = 640
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const compressed = await this.compressImage(file, quality, maxWidth, {
+        forceJpeg: true
+      })
+      const { base64, mimeType } = await this.fileToBase64Parts(compressed)
+
+      if (base64.length <= FIRESTORE_MAX_BASE64_BYTES) {
+        if (isDevMode && attempt > 0) {
+          console.log(
+            `Bild komprimiert (${attempt + 1}. Versuch): ${Math.round(base64.length / 1024)} KB`
+          )
+        }
+        return { base64, mimeType }
+      }
+
+      if (quality > minQuality + 0.08) {
+        quality -= 0.1
+      } else if (maxWidth > minWidth) {
+        maxWidth = Math.max(minWidth, Math.round(maxWidth * 0.72))
+        quality = isDocument ? 0.78 : 0.7
+      } else {
+        break
+      }
+    }
+
+    throw new Error(
+      'Das Bild ist zu groß für die Datenbank (max. ca. 1 MB pro Foto). Bitte näher heranzoomen, weniger Bilder auf einmal speichern oder die Kamera-Auflösung reduzieren.'
+    )
+  }
+
+  private async compressImage(
+    file: File,
+    quality: number,
+    maxWidth: number,
+    options?: { forceJpeg?: boolean }
+  ): Promise<File> {
     return new Promise((resolve) => {
       const reader = new FileReader()
       reader.onload = (e) => {
@@ -820,17 +878,23 @@ class DataServiceClass {
           let width = img.width
           let height = img.height
 
+          const maxHeight = Math.round(maxWidth * 1.35)
           if (width > maxWidth) {
             height = (height * maxWidth) / width
             width = maxWidth
           }
+          if (height > maxHeight) {
+            width = (width * maxHeight) / height
+            height = maxHeight
+          }
 
-          canvas.width = width
-          canvas.height = height
+          canvas.width = Math.round(width)
+          canvas.height = Math.round(height)
           const ctx = canvas.getContext('2d')!
-          ctx.drawImage(img, 0, 0, width, height)
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
 
-          const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+          const outputType =
+            options?.forceJpeg || !file.type.includes('png') ? 'image/jpeg' : 'image/png'
           canvas.toBlob(
             (blob) => {
               if (blob) {
