@@ -257,9 +257,14 @@
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
+}
+
+@media (min-width: 769px) {
+  .report-table th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
 }
 
 .report-table tbody tr:hover {

@@ -1,11 +1,10 @@
 .admin-dashboard-container {
   min-height: 100vh;
   min-height: 100dvh;
-  height: 100dvh;
+  min-height: -webkit-fill-available;
   display: flex;
   flex-direction: column;
   background: var(--background-color);
-  overflow: hidden;
 }
 
 .admin-dashboard-header {
@@ -114,7 +113,6 @@
   flex: 1;
   display: flex;
   min-height: 0;
-  overflow: hidden;
 }
 
 .dashboard-tabs {
@@ -327,6 +325,24 @@
   margin: 0 auto;
 }
 
+/* ========== PC: Scroll im Inhaltsbereich, Sidebar + Header fix im Layout ========== */
+@media (min-width: 769px) {
+  .admin-dashboard-container {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .admin-dashboard-main {
+    overflow: hidden;
+  }
+
+  .dashboard-content {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ========== Handy: ganze Seite scrollt (kein fester Viewport-Block oben) ========== */
 @media (max-width: 768px) {
   .admin-nav-toggle {
     display: flex;
@@ -378,8 +394,38 @@
     display: block;
   }
 
+  .admin-dashboard-container {
+    height: auto;
+    overflow: visible;
+  }
+
+  .admin-dashboard-main {
+    flex-direction: column;
+    min-height: auto;
+    overflow: visible;
+  }
+
   .dashboard-content {
-    padding: var(--spacing-md);
+    flex: none;
+    width: 100%;
+    min-height: auto;
+    overflow: visible;
+    padding: var(--spacing-md) var(--spacing-sm);
+    padding-bottom: max(96px, calc(env(safe-area-inset-bottom, 0px) + 72px));
+  }
+
+  .admin-dashboard-header {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .admin-controls {
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+  }
+
+  .admin-name {
+    font-size: var(--font-size-xs);
   }
 
   .admin-push-header {
