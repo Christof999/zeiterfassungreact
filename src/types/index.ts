@@ -111,6 +111,8 @@ export interface FileUpload {
   imageComment?: string
   base64Data?: string
   mimeType?: string
+  /** Pfad in Firebase Storage (neue Uploads) */
+  storagePath?: string
 }
 
 /** Gespeicherte Abrechnung aus der Mitarbeiter-Zeitauswertung (Korrektur vs. Rohzeit). */

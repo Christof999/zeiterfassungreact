@@ -18,7 +18,8 @@ import {
   arrayUnion
 } from 'firebase/firestore'
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth'
-import { db, auth } from './firebaseConfig'
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { db, auth, storage } from './firebaseConfig'
 import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement } from '../types'
 import { formatDateForInputLocal } from '../utils/dateUtils'
 
@@ -749,7 +750,33 @@ class DataServiceClass {
     }
   }
 
-  // File Upload
+  private buildStorageObjectPath(
+    projectId: string,
+    employeeId: string,
+    type: string,
+    fileName: string
+  ): string {
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'upload.jpg'
+    return `uploads/${projectId}/${employeeId}/${Date.now()}_${type}_${safeName}`
+  }
+
+  private async uploadFileToStorage(file: File, objectPath: string): Promise<string> {
+    const objectRef = storageRef(storage, objectPath)
+    await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' })
+    return getDownloadURL(objectRef)
+  }
+
+  private async prepareFileForStorageUpload(file: File, type: string): Promise<File> {
+    const isDocument = this.isDocumentFileType(type)
+    return this.compressImage(
+      file,
+      isDocument ? 0.94 : 0.88,
+      isDocument ? 3200 : 2400,
+      { forceJpeg: true }
+    )
+  }
+
+  // File Upload — bevorzugt Firebase Storage (volle Qualität), Fallback Base64 in Firestore
   async uploadFile(
     file: File,
     projectId: string,
@@ -761,24 +788,50 @@ class DataServiceClass {
   ): Promise<FileUpload> {
     await this.authReadyPromise
     try {
-      const { base64: base64String, mimeType } = await this.compressImageForFirestoreUpload(
-        file,
-        type
-      )
-
-      // Speichere in Firestore
       const fileUploadsRef = collection(db, 'fileUploads')
-      const uploadDataRaw: Record<string, unknown> = {
-        fileName: file.name,
-        fileType: type,
-        projectId,
-        employeeId,
-        base64Data: base64String,
-        mimeType,
-        notes,
-        imageComment: comment,
-        uploadTime: serverTimestamp()
+      let uploadDataRaw: Record<string, unknown>
+      let preparedFile: File
+
+      try {
+        preparedFile = await this.prepareFileForStorageUpload(file, type)
+        const objectPath = this.buildStorageObjectPath(
+          projectId,
+          employeeId,
+          type,
+          preparedFile.name
+        )
+        const downloadUrl = await this.uploadFileToStorage(preparedFile, objectPath)
+        uploadDataRaw = {
+          fileName: file.name,
+          fileType: type,
+          projectId,
+          employeeId,
+          filePath: downloadUrl,
+          storagePath: objectPath,
+          mimeType: preparedFile.type,
+          notes,
+          imageComment: comment,
+          uploadTime: serverTimestamp()
+        }
+      } catch (storageError) {
+        console.warn('Storage-Upload fehlgeschlagen, Fallback Firestore Base64:', storageError)
+        const { base64: base64String, mimeType } = await this.compressImageForFirestoreUpload(
+          file,
+          type
+        )
+        uploadDataRaw = {
+          fileName: file.name,
+          fileType: type,
+          projectId,
+          employeeId,
+          base64Data: base64String,
+          mimeType,
+          notes,
+          imageComment: comment,
+          uploadTime: serverTimestamp()
+        }
       }
+
       if (options?.timeEntryId) {
         uploadDataRaw.timeEntryId = options.timeEntryId
       }
@@ -788,18 +841,21 @@ class DataServiceClass {
 
       const docRef = await addDoc(fileUploadsRef, uploadData)
       const uploadDoc = await getDoc(docRef)
-      
+      const saved = uploadDoc.data() || {}
+
       return {
         id: docRef.id,
         fileName: file.name,
-        filePath: '', // Wird nicht verwendet bei Base64
+        filePath: String(saved.filePath || ''),
         fileType: type,
         projectId,
         employeeId,
         timeEntryId: options?.timeEntryId,
         uploadTime: uploadDoc.data()?.uploadTime || new Date(),
         notes,
-        imageComment: comment
+        imageComment: comment,
+        mimeType: String(saved.mimeType || ''),
+        base64Data: saved.base64Data ? String(saved.base64Data) : undefined
       } as FileUpload
     } catch (error) {
       console.error('Fehler beim Hochladen der Datei:', error)

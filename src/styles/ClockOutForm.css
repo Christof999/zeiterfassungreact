@@ -258,41 +258,39 @@
   transform: none !important;
 }
 
-/* Tablet+ Layout - 2-Spalten für sekundäre Buttons */
-@media (min-width: 480px) {
+/* Handy: Buttons untereinander, normal im Seitenfluss (kein Fixieren am Bildschirmrand) */
+@media (max-width: 768px) {
+  .clock-out-form {
+    padding: var(--spacing-lg) var(--spacing-md);
+  }
+
+  .clock-out-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+
+  .clock-out-buttons .btn {
+    width: 100%;
+    min-height: var(--touch-target-comfortable, 48px);
+  }
+
+  .clock-out-buttons .btn.primary-btn {
+    order: -1;
+  }
+}
+
+/* PC/Tablet: 2-Spalten-Grid für Zusatzaktionen */
+@media (min-width: 769px) {
   .clock-out-buttons {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: var(--spacing-md);
   }
 
-  .clock-out-buttons .btn.primary-btn {
-    grid-column: 1 / -1;
-  }
-
+  .clock-out-buttons .btn.primary-btn,
   .clock-out-buttons .btn.secondary-btn {
     grid-column: 1 / -1;
-  }
-}
-
-@media (max-width: 768px) {
-  .time-tracking-container.is-clocked-in .clock-out-form {
-    padding-bottom: calc(260px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .time-tracking-container.is-clocked-in .clock-out-buttons {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 90;
-    max-width: 640px;
-    margin: 0 auto;
-    padding: var(--spacing-md) var(--spacing-md) max(var(--spacing-md), env(safe-area-inset-bottom, 0px));
-    background: var(--card-background);
-    border-top: 1px solid var(--border-color);
-    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.12);
-    box-sizing: border-box;
   }
 }
 

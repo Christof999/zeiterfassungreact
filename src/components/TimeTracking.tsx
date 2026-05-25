@@ -169,9 +169,7 @@ const TimeTracking: React.FC = () => {
   }
 
   return (
-    <div
-      className={`time-tracking-container${currentTimeEntry ? ' is-clocked-in' : ''}`}
-    >
+    <div className="time-tracking-container">
       <header className="time-tracking-header">
         <div className="time-tracking-logo">
           <img 
@@ -195,7 +193,7 @@ const TimeTracking: React.FC = () => {
           </div>
         </div>
 
-        {canManualTimeEntry && (
+        {canManualTimeEntry && !currentTimeEntry && (
           <div className="manual-time-entry-banner">
             <p className="manual-time-entry-banner-text">
               Sie können vergessene Stempelzeiten für sich oder andere Mitarbeiter nachtragen sowie
@@ -258,6 +256,18 @@ const TimeTracking: React.FC = () => {
               })
             }}
           />
+        )}
+
+        {canManualTimeEntry && currentTimeEntry && (
+          <div className="manual-time-entry-compact">
+            <button
+              type="button"
+              className="manual-time-entry-link-btn"
+              onClick={() => setShowRetroDocListModal(true)}
+            >
+              Bericht für vergangene Tage nachtragen
+            </button>
+          </div>
         )}
 
         <RecentActivities employeeId={currentUser.id!} refreshKey={activitiesRefreshKey} />

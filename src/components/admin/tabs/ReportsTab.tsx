@@ -4,6 +4,7 @@ import type { Employee, TimeEntry, Project, Vehicle, VehicleUsage, FileUpload, T
 import { toast } from '../../ToastContainer'
 import { formatDateForInputLocal } from '../../../utils/dateUtils'
 import { collectEntryDocumentation } from '../../../utils/entryDocumentation'
+import { getFileImageSrc } from '../../../utils/fileImageSrc'
 import '../../../styles/AdminTabs.css'
 import '../../../styles/ReportPrint.css'
 
@@ -843,16 +844,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
   const getVehicleTotalCost = () => vehicleSummaries.reduce((sum, v) => sum + v.totalCost, 0)
   const getProjectTotalCost = () => getEmployeeTotalCost() + getVehicleTotalCost()
 
-  const getImageSrc = (file: FileUpload): string => {
-    if (file.base64Data) {
-      if (file.base64Data.startsWith('data:')) return file.base64Data
-      const mime = file.mimeType || 'image/jpeg'
-      return `data:${mime};base64,${file.base64Data}`
-    }
-    if ((file as any).fileUrl) return (file as any).fileUrl
-    if ((file as any).url) return (file as any).url
-    return ''
-  }
+  const getImageSrc = (file: FileUpload): string => getFileImageSrc(file)
 
   const handlePrint = () => {
     if (isPrintInProgressRef.current) {

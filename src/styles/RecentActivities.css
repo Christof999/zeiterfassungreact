@@ -7,12 +7,6 @@
   animation: slideUp 0.5s var(--transition-base) 0.3s backwards;
 }
 
-@media (max-width: 768px) {
-  .time-tracking-container.is-clocked-in .recent-activities {
-    margin-bottom: calc(240px + env(safe-area-inset-bottom, 0px));
-  }
-}
-
 .recent-activities h3 {
   margin-bottom: var(--spacing-lg);
   font-size: var(--font-size-xs);
