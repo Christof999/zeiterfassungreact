@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react'
 import { DataService } from '../services/dataService'
 import type { TimeEntry, Vehicle, FileUpload } from '../types'
 import PhotoUpload, { type PhotoUploadItem } from './PhotoUpload'
+import SaveProgressOverlay from './SaveProgressOverlay'
 import { VehicleBookingFormFields } from './VehicleBookingFormFields'
+import { uploadPhotoItemsForTimeEntry } from '../utils/uploadEntryPhotos'
 import { toast } from './ToastContainer'
 import { formatDateForInputLocal } from '../utils/dateUtils'
 import '../styles/Modal.css'
@@ -55,6 +57,9 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
   const [sitePhotoItems, setSitePhotoItems] = useState<PhotoUploadItem[]>([])
   const [documentPhotoItems, setDocumentPhotoItems] = useState<PhotoUploadItem[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [progressMessage, setProgressMessage] = useState('')
+  const [progressStep, setProgressStep] = useState(0)
+  const [progressTotal, setProgressTotal] = useState(0)
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [vehicleRows, setVehicleRows] = useState<VehicleBookingRow[]>(() => [createVehicleBookingRow()])
 
@@ -99,37 +104,43 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsSubmitting(true)
 
-    try {
-      const bookingsToSave = vehicleRows.filter((r) => r.vehicleId.trim() !== '')
+    const bookingsToSave = vehicleRows.filter((r) => r.vehicleId.trim() !== '')
 
-      if (bookingsToSave.length > 0) {
-        for (const row of bookingsToSave) {
-          if (!Number.isFinite(row.hours) || row.hours < 0.25 || row.hours > 24) {
-            toast.error('Bitte gültige Betriebsstunden (0,25–24) für alle gewählten Fahrzeuge eingeben.')
-            setIsSubmitting(false)
-            return
-          }
+    if (bookingsToSave.length > 0) {
+      for (const row of bookingsToSave) {
+        if (!Number.isFinite(row.hours) || row.hours < 0.25 || row.hours > 24) {
+          toast.error('Bitte gültige Betriebsstunden (0,25–24) für alle gewählten Fahrzeuge eingeben.')
+          return
         }
       }
+    }
 
-      const notesChanged = notes.trim() !== (timeEntry.notes || '').trim()
-      const hasNewPhotos = sitePhotoItems.length > 0 || documentPhotoItems.length > 0
-      if (!notesChanged && !hasNewPhotos && bookingsToSave.length === 0) {
-        toast.error('Bitte ergänzen Sie Notizen, Fotos/Dokumente oder Fahrzeugbuchungen.')
-        setIsSubmitting(false)
-        return
-      }
+    const notesChanged = notes.trim() !== (timeEntry.notes || '').trim()
+    const hasNewPhotos = sitePhotoItems.length > 0 || documentPhotoItems.length > 0
+    if (!notesChanged && !hasNewPhotos && bookingsToSave.length === 0) {
+      toast.error('Bitte ergänzen Sie Notizen, Fotos/Dokumente oder Fahrzeugbuchungen.')
+      return
+    }
+
+    const fileCount = sitePhotoItems.length + documentPhotoItems.length
+    const totalSteps = bookingsToSave.length + fileCount + 1
+
+    setIsSubmitting(true)
+    setProgressTotal(totalSteps)
+    setProgressStep(0)
+    setProgressMessage('Speichern wird vorbereitet…')
+
+    try {
+      let step = 0
 
       if (bookingsToSave.length > 0) {
         const currentUser = await DataService.getCurrentUser()
         if (!currentUser) {
-          toast.error('Benutzer nicht gefunden.')
-          setIsSubmitting(false)
-          return
+          throw new Error('Benutzer nicht gefunden.')
         }
         for (const row of bookingsToSave) {
+          setProgressMessage(`Fahrzeugbuchung ${step + 1} von ${bookingsToSave.length}`)
           const selectedVehicle = vehicles.find((v) => String(v.id) === String(row.vehicleId))
           await DataService.addVehicleUsage({
             vehicleId: row.vehicleId,
@@ -142,37 +153,41 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
             hoursUsed: row.hours,
             comment: row.comment.trim() || undefined
           })
+          step += 1
+          setProgressStep(step)
         }
       }
 
-      const sitePhotoObjects: FileUpload[] = []
-      for (const { file, comment } of sitePhotoItems) {
-        const upload = await DataService.uploadFile(
-          file,
-          timeEntry.projectId,
-          timeEntry.employeeId,
-          'construction_site',
-          '',
-          comment.trim(),
-          { timeEntryId: timeEntry.id }
-        )
-        sitePhotoObjects.push(upload)
-      }
+      const { uploads: sitePhotoObjects, stepsDone: afterSite } =
+        await uploadPhotoItemsForTimeEntry({
+          items: sitePhotoItems,
+          projectId: timeEntry.projectId,
+          employeeId: timeEntry.employeeId,
+          timeEntryId: timeEntry.id,
+          resolveFileType: () => 'construction_site',
+          label: 'Baustellenfoto',
+          initialStep: step,
+          onProgress: ({ message, step: s }) => {
+            setProgressMessage(message)
+            setProgressStep(s)
+          }
+        })
+      step = afterSite
 
-      const documentPhotoObjects: FileUpload[] = []
-      for (const { file, comment } of documentPhotoItems) {
-        const documentType = file.name.toLowerCase().includes('rechnung') ? 'invoice' : 'delivery_note'
-        const upload = await DataService.uploadFile(
-          file,
-          timeEntry.projectId,
-          timeEntry.employeeId,
-          documentType,
-          '',
-          comment.trim(),
-          { timeEntryId: timeEntry.id }
-        )
-        documentPhotoObjects.push(upload)
-      }
+      const { uploads: documentPhotoObjects } = await uploadPhotoItemsForTimeEntry({
+        items: documentPhotoItems,
+        projectId: timeEntry.projectId,
+        employeeId: timeEntry.employeeId,
+        timeEntryId: timeEntry.id,
+        resolveFileType: (file) =>
+          file.name.toLowerCase().includes('rechnung') ? 'invoice' : 'delivery_note',
+        label: 'Dokument',
+        initialStep: step,
+        onProgress: ({ message, step: s }) => {
+          setProgressMessage(message)
+          setProgressStep(s)
+        }
+      })
 
       const newSiteIds = sitePhotoObjects.map((u) => u.id)
       const newDocIds = documentPhotoObjects.map((u) => u.id)
@@ -182,6 +197,7 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
       const mergedSitePhotos = mergeFileList(timeEntry.sitePhotos, sitePhotoObjects)
       const mergedDocuments = mergeFileList(timeEntry.documents, documentPhotoObjects)
 
+      setProgressMessage('Zeiteintrag wird aktualisiert…')
       await DataService.updateTimeEntry(timeEntry.id, {
         notes: notes.trim(),
         sitePhotoUploads: mergedSiteUploads,
@@ -195,22 +211,36 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
           notes.trim() !== ''
       })
 
+      setProgressStep(totalSteps)
       toast.success('Dokumentation wurde gespeichert.')
       onSaved()
       onClose()
-    } catch (error: any) {
-      toast.error('Fehler beim Speichern: ' + error.message)
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unbekannter Fehler'
+      console.error('Dokumentation nachtragen:', error)
+      toast.error('Fehler beim Speichern: ' + msg)
     } finally {
       setIsSubmitting(false)
+      setProgressMessage('')
+      setProgressStep(0)
+      setProgressTotal(0)
     }
   }
 
   return (
-    <div className="modal-overlay retro-doc-detail-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay retro-doc-detail-overlay"
+      onClick={isSubmitting ? undefined : onClose}
+    >
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>Bericht / Dokumentation nachtragen</h3>
-          <button type="button" className="close-modal-btn" onClick={onClose}>
+          <button
+            type="button"
+            className="close-modal-btn"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
             ×
           </button>
         </div>
@@ -295,13 +325,25 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
               <button type="submit" className="btn primary-btn" disabled={isSubmitting}>
                 {isSubmitting ? 'Speichere...' : 'Dokumentation speichern'}
               </button>
-              <button type="button" className="btn secondary-btn" onClick={onClose}>
+              <button
+                type="button"
+                className="btn secondary-btn"
+                onClick={onClose}
+                disabled={isSubmitting}
+              >
                 Abbrechen
               </button>
             </div>
           </form>
         </div>
       </div>
+
+      <SaveProgressOverlay
+        visible={isSubmitting}
+        message={progressMessage || 'Bitte warten…'}
+        current={progressStep}
+        total={progressTotal}
+      />
     </div>
   )
 }

@@ -22,6 +22,10 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage
 import { db, auth, storage } from './firebaseConfig'
 import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement } from '../types'
 import { formatDateForInputLocal } from '../utils/dateUtils'
+import { withTimeout } from '../utils/withTimeout'
+
+const STORAGE_UPLOAD_TIMEOUT_MS = 25_000
+const IMAGE_PREPARE_TIMEOUT_MS = 90_000
 
 const isDevMode = typeof import.meta !== 'undefined' && !!import.meta.env?.DEV
 
@@ -768,12 +772,9 @@ class DataServiceClass {
 
   private async prepareFileForStorageUpload(file: File, type: string): Promise<File> {
     const isDocument = this.isDocumentFileType(type)
-    return this.compressImage(
-      file,
-      isDocument ? 0.94 : 0.88,
-      isDocument ? 3200 : 2400,
-      { forceJpeg: true }
-    )
+    // Auf Mobilgeräten schneller, in Storage trotzdem deutlich schärfer als früher
+    const maxWidth = isDocument ? 2400 : 1800
+    return this.compressImage(file, isDocument ? 0.9 : 0.85, maxWidth, { forceJpeg: true })
   }
 
   // File Upload — bevorzugt Firebase Storage (volle Qualität), Fallback Base64 in Firestore
@@ -784,23 +785,34 @@ class DataServiceClass {
     type: string = 'construction_site',
     notes: string = '',
     comment: string = '',
-    options?: { timeEntryId?: string }
+    options?: { timeEntryId?: string; onProgress?: (message: string) => void }
   ): Promise<FileUpload> {
     await this.authReadyPromise
+    const report = (msg: string) => options?.onProgress?.(msg)
     try {
       const fileUploadsRef = collection(db, 'fileUploads')
       let uploadDataRaw: Record<string, unknown>
       let preparedFile: File
 
       try {
-        preparedFile = await this.prepareFileForStorageUpload(file, type)
+        report('Bild wird vorbereitet…')
+        preparedFile = await withTimeout(
+          this.prepareFileForStorageUpload(file, type),
+          IMAGE_PREPARE_TIMEOUT_MS,
+          'Die Bildaufbereitung hat zu lange gedauert.'
+        )
         const objectPath = this.buildStorageObjectPath(
           projectId,
           employeeId,
           type,
           preparedFile.name
         )
-        const downloadUrl = await this.uploadFileToStorage(preparedFile, objectPath)
+        report('Wird in Firebase Storage hochgeladen…')
+        const downloadUrl = await withTimeout(
+          this.uploadFileToStorage(preparedFile, objectPath),
+          STORAGE_UPLOAD_TIMEOUT_MS,
+          'Storage-Upload Zeitüberschreitung'
+        )
         uploadDataRaw = {
           fileName: file.name,
           fileType: type,
@@ -815,9 +827,11 @@ class DataServiceClass {
         }
       } catch (storageError) {
         console.warn('Storage-Upload fehlgeschlagen, Fallback Firestore Base64:', storageError)
-        const { base64: base64String, mimeType } = await this.compressImageForFirestoreUpload(
-          file,
-          type
+        report('Speichere komprimiert in der Datenbank…')
+        const { base64: base64String, mimeType } = await withTimeout(
+          this.compressImageForFirestoreUpload(file, type),
+          IMAGE_PREPARE_TIMEOUT_MS,
+          'Die Bildkomprimierung hat zu lange gedauert.'
         )
         uploadDataRaw = {
           fileName: file.name,
@@ -839,6 +853,7 @@ class DataServiceClass {
         Object.entries(uploadDataRaw).filter(([, v]) => v !== undefined)
       )
 
+      report('Metadaten werden gespeichert…')
       const docRef = await addDoc(fileUploadsRef, uploadData)
       const uploadDoc = await getDoc(docRef)
       const saved = uploadDoc.data() || {}
