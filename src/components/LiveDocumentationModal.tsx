@@ -110,6 +110,7 @@ const LiveDocumentationModal: React.FC<LiveDocumentationModalProps> = ({
               label="Dokumente/Lieferscheine:"
               onItemsChange={setDocumentPhotoItems}
               commentFieldLabel="Kommentar zu diesem Dokument (optional)"
+              captureMode="document"
             />
 
             <div className="form-group text-center">

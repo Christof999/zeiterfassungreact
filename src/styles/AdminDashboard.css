@@ -1,8 +1,11 @@
 .admin-dashboard-container {
   min-height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--background-color);
+  overflow: hidden;
 }
 
 .admin-dashboard-header {
@@ -110,6 +113,7 @@
 .admin-dashboard-main {
   flex: 1;
   display: flex;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -169,8 +173,12 @@
 
 .dashboard-content {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   padding: var(--spacing-lg);
   overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .admin-push-card {

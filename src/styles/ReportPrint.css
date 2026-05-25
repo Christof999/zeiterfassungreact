@@ -112,6 +112,11 @@
   }
 }
 
+.reports-tab {
+  min-height: 0;
+  width: 100%;
+}
+
 /* Report Tabelle Styles */
 .report-content {
   background: var(--card-background);
@@ -659,6 +664,32 @@
   white-space: nowrap;
 }
 
+@media (min-width: 769px) {
+  .photo-desc,
+  .document-desc {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    word-break: break-word;
+    line-height: var(--line-height-relaxed);
+  }
+
+  .photo-card {
+    overflow: visible;
+  }
+
+  .document-info {
+    overflow: visible;
+  }
+
+  .document-name {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    word-break: break-word;
+  }
+}
+
 /* Dokumente Liste */
 .document-list {
   display: flex;
@@ -913,12 +944,69 @@
   }
   
   .photo-card {
-    page-break-inside: avoid;
+    page-break-inside: auto;
+    break-inside: auto;
     background: #f5f5f5 !important;
+    overflow: visible !important;
+  }
+
+  .photo-info,
+  .document-info {
+    overflow: visible !important;
+    padding: 8px !important;
+  }
+
+  .photo-desc,
+  .document-desc {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    word-break: break-word !important;
+    line-height: 1.4 !important;
+    display: block !important;
+  }
+
+  .document-name {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    word-break: break-word !important;
+  }
+
+  .project-day-media-block,
+  .project-day-text-block,
+  .pet-notes {
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+
+  .project-day-expand {
+    display: none !important;
+  }
+
+  .project-day-emp-table.screen-collapsed {
+    display: table !important;
+    width: 100% !important;
+    margin: 8px 0 12px !important;
+  }
+
+  .report-table .comment-cell {
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    max-width: 220px;
+    vertical-align: top !important;
+  }
+
+  .admin-dashboard-container,
+  .admin-dashboard-main,
+  .dashboard-content {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
   }
   
   .media-section {
-    page-break-inside: avoid;
+    page-break-inside: auto;
   }
   
   /* Mitarbeiter-Report Tabelle */
@@ -1190,6 +1278,10 @@
 
 .reports-tab .project-day-emp-table th {
   background: var(--light-color);
+}
+
+.reports-tab .project-day-emp-table.screen-collapsed {
+  display: none;
 }
 
 .reports-tab .project-day-text-block h5,

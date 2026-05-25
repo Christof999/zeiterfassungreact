@@ -235,6 +235,7 @@ const ExtendedClockOutModal: React.FC<ExtendedClockOutModalProps> = ({
               label="Lieferscheine oder Rechnungen:"
               onItemsChange={setDocumentPhotoItems}
               commentFieldLabel="Kommentar zu diesem Dokument (optional)"
+              captureMode="document"
             />
 
             <div className="form-group">

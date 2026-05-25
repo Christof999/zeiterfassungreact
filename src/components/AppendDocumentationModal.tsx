@@ -237,6 +237,7 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
               label="Lieferscheine oder Rechnungen:"
               onItemsChange={setDocumentPhotoItems}
               commentFieldLabel="Kommentar zu diesem Dokument (optional)"
+              captureMode="document"
             />
 
             <div className="form-group">

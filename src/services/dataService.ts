@@ -758,8 +758,11 @@ class DataServiceClass {
   ): Promise<FileUpload> {
     await this.authReadyPromise
     try {
-      // Komprimiere Bild
-      const compressedFile = await this.compressImage(file, 0.5, 600)
+      const isDocumentUpload =
+        type === 'invoice' || type === 'delivery_note' || type === 'document'
+      const quality = isDocumentUpload ? 0.92 : 0.82
+      const maxWidth = isDocumentUpload ? 2400 : 1600
+      const compressedFile = await this.compressImage(file, quality, maxWidth)
       
       // Konvertiere zu Base64
       const base64DataUrl = await this.fileToBase64(compressedFile)
@@ -827,15 +830,18 @@ class DataServiceClass {
           const ctx = canvas.getContext('2d')!
           ctx.drawImage(img, 0, 0, width, height)
 
+          const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
           canvas.toBlob(
             (blob) => {
               if (blob) {
-                resolve(new File([blob], file.name, { type: file.type }))
+                const ext = outputType === 'image/png' ? '.png' : '.jpg'
+                const baseName = file.name.replace(/\.[^.]+$/, '') || 'upload'
+                resolve(new File([blob], `${baseName}${ext}`, { type: outputType }))
               } else {
                 resolve(file)
               }
             },
-            file.type,
+            outputType,
             quality
           )
         }
