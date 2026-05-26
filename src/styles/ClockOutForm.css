@@ -298,7 +298,7 @@
   }
 }
 
-/* PC/Tablet: 2-Spalten-Grid für Zusatzaktionen */
+/* Tablet+: 2-Spalten-Grid für Zusatzaktionen */
 @media (min-width: 769px) {
   .clock-out-buttons {
     display: grid;
@@ -310,6 +310,12 @@
   .clock-out-buttons .btn.primary-btn,
   .clock-out-buttons .btn.secondary-btn {
     grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1024px) {
+  .clock-out-form {
+    padding: var(--spacing-xl);
   }
 }
 

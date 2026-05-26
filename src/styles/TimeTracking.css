@@ -119,12 +119,76 @@
   }
 }
 
-/* ========== PC: fester Viewport, Scroll nur im Inhaltsbereich ========== */
+/* ========== Tablet / iPad quer: breiterer Inhalt ========== */
 @media (min-width: 769px) {
   .time-tracking-main {
-    max-width: 720px;
+    max-width: min(840px, 96vw);
     padding: var(--spacing-xl) var(--spacing-lg);
     gap: var(--spacing-lg);
+  }
+
+  .time-tracking-header {
+    padding-left: var(--spacing-xl);
+    padding-right: var(--spacing-xl);
+  }
+
+  .time-tracking-logo {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--spacing-lg);
+    text-align: left;
+  }
+
+  .time-tracking-logo-image {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 0;
+  }
+
+  .time-tracking-logo h1 {
+    font-size: 1.5rem;
+  }
+}
+
+/* ========== Großer Bildschirm / iPad am Monitor: 2-Spalten-Layout ========== */
+@media (min-width: 1024px) {
+  .time-tracking-main {
+    max-width: min(1120px, 94vw);
+    padding: var(--spacing-xl) var(--spacing-2xl);
+  }
+
+  .time-tracking-workspace {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.15fr);
+    gap: var(--spacing-lg);
+    align-items: start;
+  }
+
+  .manual-time-entry-banner,
+  .manual-time-entry-compact {
+    grid-column: 1 / -1;
+  }
+
+  .time-status-section {
+    grid-column: 1;
+    margin: 0;
+  }
+
+  .clock-in-form,
+  .clock-out-form {
+    grid-column: 2;
+    align-self: start;
+  }
+}
+
+@media (min-width: 1400px) {
+  .time-tracking-main {
+    max-width: min(1280px, 92vw);
+  }
+
+  .time-tracking-workspace {
+    grid-template-columns: minmax(320px, 1fr) minmax(380px, 1.2fr);
+    gap: var(--spacing-xl);
   }
 }
 
