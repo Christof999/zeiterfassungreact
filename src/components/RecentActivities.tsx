@@ -20,8 +20,8 @@ const RecentActivities: React.FC<RecentActivitiesProps> = ({ employeeId, refresh
       try {
         // Lade Einträge und Projekte parallel
         const [entries, allProjects] = await Promise.all([
-          DataService.getTimeEntriesByEmployeeId(employeeId),
-          DataService.getAllProjects()
+          DataService.getTimeEntriesByEmployeeId(employeeId, { limit: 30 }),
+          DataService.getActiveProjects()
         ])
         
         setProjects(allProjects)

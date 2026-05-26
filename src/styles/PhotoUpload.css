@@ -49,6 +49,20 @@
   border-color: var(--medium-gray);
 }
 
+.file-label-primary {
+  background: var(--primary-light);
+  border-color: var(--primary-color);
+  color: var(--primary-dark);
+  font-weight: var(--font-weight-semibold);
+}
+
+.photo-upload-scan-hint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: var(--line-height-relaxed);
+}
+
 .file-label:active {
   transform: scale(0.98);
   background-color: var(--border-color);

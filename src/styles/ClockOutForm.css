@@ -251,6 +251,20 @@
   border-color: var(--medium-gray);
 }
 
+.clock-out-buttons .btn.project-switch-btn {
+  background: var(--accent-light);
+  color: var(--accent-color, #2563eb);
+  border: 1px solid var(--accent-color, #3b82f6);
+  font-weight: var(--font-weight-semibold);
+}
+
+.clock-out-buttons .btn.project-switch-btn:hover:not(:disabled) {
+  background: var(--accent-color, #3b82f6);
+  color: #fff;
+  border-color: var(--accent-color, #3b82f6);
+  transform: translateY(-1px);
+}
+
 /* Disabled State */
 .clock-out-buttons .btn:disabled {
   opacity: 0.5;
@@ -258,20 +272,50 @@
   transform: none !important;
 }
 
-/* Tablet+ Layout - 2-Spalten für sekundäre Buttons */
-@media (min-width: 480px) {
+/* Handy: Buttons untereinander, normal im Seitenfluss (kein Fixieren am Bildschirmrand) */
+@media (max-width: 768px) {
+  .clock-out-form {
+    padding: var(--spacing-lg) var(--spacing-md);
+  }
+
+  .clock-out-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+
+  .clock-out-buttons .btn {
+    width: 100%;
+    min-height: var(--touch-target-comfortable, 48px);
+  }
+
+  .clock-out-buttons .btn.project-switch-btn {
+    order: -2;
+  }
+
+  .clock-out-buttons .btn.primary-btn {
+    order: -1;
+  }
+}
+
+/* Tablet+: 2-Spalten-Grid für Zusatzaktionen */
+@media (min-width: 769px) {
   .clock-out-buttons {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: var(--spacing-md);
   }
 
-  .clock-out-buttons .btn.primary-btn {
-    grid-column: 1 / -1;
-  }
-
+  .clock-out-buttons .btn.project-switch-btn,
+  .clock-out-buttons .btn.primary-btn,
   .clock-out-buttons .btn.secondary-btn {
     grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1024px) {
+  .clock-out-form {
+    padding: var(--spacing-xl);
   }
 }
 

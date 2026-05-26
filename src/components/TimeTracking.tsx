@@ -100,6 +100,41 @@ const TimeTracking: React.FC = () => {
     }
   }
 
+  const handleProjectSwitch = async (newProjectId: string) => {
+    if (!currentTimeEntry || !currentUser?.id) return
+
+    try {
+      const location = await getCurrentLocation()
+      const timeEntry = await DataService.switchActiveProject(
+        currentUser.id,
+        currentTimeEntry.id,
+        newProjectId,
+        location
+      )
+
+      const project = await DataService.getProjectById(newProjectId)
+      setCurrentTimeEntry(timeEntry)
+      setCurrentProject(project)
+
+      const clockIn =
+        timeEntry.clockInTime instanceof Date
+          ? timeEntry.clockInTime
+          : timeEntry.clockInTime?.toDate?.() || new Date()
+      setClockInTime(clockIn)
+      setActivitiesRefreshKey((k) => k + 1)
+
+      toast.success(
+        project?.name
+          ? `Projekt gewechselt: ${project.name}`
+          : 'Projekt wurde gewechselt'
+      )
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unbekannter Fehler'
+      toast.error('Projektwechsel fehlgeschlagen: ' + msg)
+      throw error
+    }
+  }
+
   const handleSimpleClockOut = async (pauseMinutes: number) => {
     if (!currentTimeEntry) return
 
@@ -193,70 +228,88 @@ const TimeTracking: React.FC = () => {
           </div>
         </div>
 
-        {canManualTimeEntry && (
-          <div className="manual-time-entry-banner">
-            <p className="manual-time-entry-banner-text">
-              Sie können vergessene Stempelzeiten für sich oder andere Mitarbeiter nachtragen sowie
-              Dokumentation zu bereits abgeschlossenen Tagen ergänzen.
-            </p>
-            <div className="manual-time-entry-actions">
-              <button
-                type="button"
-                className="manual-time-entry-open-btn"
-                onClick={() => setShowManualEntryModal(true)}
-              >
-                Stempelzeit nachtragen
-              </button>
-              <button
-                type="button"
-                className="manual-time-entry-secondary-btn"
-                onClick={() => setShowRetroDocListModal(true)}
-              >
-                Bericht nachtragen
-              </button>
+        <div className="time-tracking-workspace">
+          {canManualTimeEntry && !currentTimeEntry && (
+            <div className="manual-time-entry-banner">
+              <p className="manual-time-entry-banner-text">
+                Sie können vergessene Stempelzeiten für sich oder andere Mitarbeiter nachtragen sowie
+                Dokumentation zu bereits abgeschlossenen Tagen ergänzen.
+              </p>
+              <div className="manual-time-entry-actions">
+                <button
+                  type="button"
+                  className="manual-time-entry-open-btn"
+                  onClick={() => setShowManualEntryModal(true)}
+                >
+                  Stempelzeit nachtragen
+                </button>
+                <button
+                  type="button"
+                  className="manual-time-entry-secondary-btn"
+                  onClick={() => setShowRetroDocListModal(true)}
+                >
+                  Bericht nachtragen
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="time-status-section">
+            <h2>
+              Status:{' '}
+              <span className={currentTimeEntry ? 'status-clocked-in' : 'status-clocked-out'}>
+                {currentTimeEntry ? 'Eingestempelt' : 'Nicht eingestempelt'}
+              </span>
+            </h2>
+            <div className="clock">
+              <span>{elapsedTime}</span>
             </div>
           </div>
-        )}
 
-        <div className="time-status-section">
-          <h2>Status: <span className={currentTimeEntry ? 'status-clocked-in' : 'status-clocked-out'}>
-            {currentTimeEntry ? 'Eingestempelt' : 'Nicht eingestempelt'}
-          </span></h2>
-          <div className="clock">
-            <span>{elapsedTime}</span>
-          </div>
+          {!currentTimeEntry ? (
+            <ClockInForm onClockIn={handleClockIn} />
+          ) : (
+            <ClockOutForm
+              timeEntry={currentTimeEntry}
+              project={currentProject}
+              clockInTime={clockInTime}
+              onSimpleClockOut={handleSimpleClockOut}
+              onExtendedClockOutSuccess={resetClockOutState}
+              onProjectSwitch={handleProjectSwitch}
+              onUpdate={() => {
+                DataService.getCurrentTimeEntry(currentUser.id!).then(async (entry) => {
+                  setCurrentTimeEntry(entry)
+
+                  if (!entry) {
+                    resetClockOutState()
+                    return
+                  }
+
+                  const project = await DataService.getProjectById(entry.projectId)
+                  setCurrentProject(project)
+
+                  const clockIn =
+                    entry.clockInTime instanceof Date
+                      ? entry.clockInTime
+                      : entry.clockInTime?.toDate?.() || new Date(entry.clockInTime)
+                  setClockInTime(clockIn)
+                })
+              }}
+            />
+          )}
+
+          {canManualTimeEntry && currentTimeEntry && (
+            <div className="manual-time-entry-compact">
+              <button
+                type="button"
+                className="manual-time-entry-link-btn"
+                onClick={() => setShowRetroDocListModal(true)}
+              >
+                Bericht für vergangene Tage nachtragen
+              </button>
+            </div>
+          )}
         </div>
-
-        {!currentTimeEntry ? (
-          <ClockInForm onClockIn={handleClockIn} />
-        ) : (
-          <ClockOutForm
-            timeEntry={currentTimeEntry}
-            project={currentProject}
-            clockInTime={clockInTime}
-            onSimpleClockOut={handleSimpleClockOut}
-            onExtendedClockOutSuccess={resetClockOutState}
-            onUpdate={() => {
-              // Reload time entry inkl. Anzeigezustand
-              DataService.getCurrentTimeEntry(currentUser.id!).then(async (entry) => {
-                setCurrentTimeEntry(entry)
-
-                if (!entry) {
-                  resetClockOutState()
-                  return
-                }
-
-                const project = await DataService.getProjectById(entry.projectId)
-                setCurrentProject(project)
-
-                const clockIn = entry.clockInTime instanceof Date
-                  ? entry.clockInTime
-                  : entry.clockInTime?.toDate?.() || new Date(entry.clockInTime)
-                setClockInTime(clockIn)
-              })
-            }}
-          />
-        )}
 
         <RecentActivities employeeId={currentUser.id!} refreshKey={activitiesRefreshKey} />
 

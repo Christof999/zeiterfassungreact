@@ -136,8 +136,23 @@ html, body {
 #root {
   min-height: 100vh;
   min-height: 100dvh; /* Dynamic viewport height für Mobile */
+  min-height: -webkit-fill-available;
   display: flex;
   flex-direction: column;
+}
+
+@media (max-width: 768px) {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+    height: auto;
+  }
+
+  body {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 /* Typography - Mobile optimiert */
