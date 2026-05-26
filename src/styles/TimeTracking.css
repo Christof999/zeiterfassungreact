@@ -1,9 +1,17 @@
 .time-tracking-container {
   min-height: 100vh;
   min-height: 100dvh;
+  min-height: -webkit-fill-available;
   display: flex;
   flex-direction: column;
   background: var(--light-color);
+}
+
+@media (min-width: 769px) {
+  .time-tracking-container {
+    height: 100dvh;
+    overflow: hidden;
+  }
 }
 
 /* Header */
@@ -16,8 +24,9 @@
   position: sticky;
   top: 0;
   z-index: 100;
+  flex-shrink: 0;
   /* Safe Area Support */
-  padding-top: max(var(--spacing-lg), env(safe-area-inset-top));
+  padding-top: max(var(--spacing-lg), env(safe-area-inset-top, 0px));
 }
 
 .time-tracking-logo {
@@ -60,14 +69,127 @@
 /* Main Content */
 .time-tracking-main {
   flex: 1;
+  min-height: 0;
   padding: var(--spacing-lg) var(--spacing-md);
   max-width: 640px;
   margin: 0 auto;
   width: 100%;
-  padding-bottom: calc(var(--spacing-2xl) + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--spacing-2xl) + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
+  overflow-x: hidden;
+}
+
+@media (min-width: 769px) {
+  .time-tracking-main {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ========== Handy: natürliches Scrollen, keine festen Höhen ========== */
+@media (max-width: 768px) {
+  .time-tracking-container {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .time-tracking-main {
+    flex: 1 1 auto;
+    min-height: auto;
+    overflow: visible;
+    padding: var(--spacing-md) var(--spacing-sm);
+    padding-bottom: max(100px, calc(env(safe-area-inset-bottom, 0px) + 80px));
+    gap: var(--spacing-sm);
+  }
+
+  .time-tracking-header {
+    position: relative;
+    padding: var(--spacing-md);
+  }
+
+  .time-status-section {
+    padding: var(--spacing-lg) var(--spacing-md);
+  }
+
+  .clock {
+    font-size: clamp(2rem, 14vw, 3rem);
+  }
+}
+
+/* ========== Tablet / iPad quer: breiterer Inhalt ========== */
+@media (min-width: 769px) {
+  .time-tracking-main {
+    max-width: min(840px, 96vw);
+    padding: var(--spacing-xl) var(--spacing-lg);
+    gap: var(--spacing-lg);
+  }
+
+  .time-tracking-header {
+    padding-left: var(--spacing-xl);
+    padding-right: var(--spacing-xl);
+  }
+
+  .time-tracking-logo {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--spacing-lg);
+    text-align: left;
+  }
+
+  .time-tracking-logo-image {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 0;
+  }
+
+  .time-tracking-logo h1 {
+    font-size: 1.5rem;
+  }
+}
+
+/* ========== Großer Bildschirm / iPad am Monitor: 2-Spalten-Layout ========== */
+@media (min-width: 1024px) {
+  .time-tracking-main {
+    max-width: min(1120px, 94vw);
+    padding: var(--spacing-xl) var(--spacing-2xl);
+  }
+
+  .time-tracking-workspace {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.15fr);
+    gap: var(--spacing-lg);
+    align-items: start;
+  }
+
+  .manual-time-entry-banner,
+  .manual-time-entry-compact {
+    grid-column: 1 / -1;
+  }
+
+  .time-status-section {
+    grid-column: 1;
+    margin: 0;
+  }
+
+  .clock-in-form,
+  .clock-out-form {
+    grid-column: 2;
+    align-self: start;
+  }
+}
+
+@media (min-width: 1400px) {
+  .time-tracking-main {
+    max-width: min(1280px, 92vw);
+  }
+
+  .time-tracking-workspace {
+    grid-template-columns: minmax(320px, 1fr) minmax(380px, 1.2fr);
+    gap: var(--spacing-xl);
+  }
 }
 
 /* User Info Section - Kompakt und elegant */
@@ -328,4 +450,61 @@
 .manual-time-entry-open-btn:active:not(:disabled) {
   background: var(--border-light);
   transform: translateY(0);
+}
+
+.manual-time-entry-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.manual-time-entry-secondary-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--btn-padding-y, 12px) var(--btn-padding-x, var(--spacing-md));
+  min-height: var(--btn-height, 44px);
+  border-radius: var(--radius-md);
+  font-size: var(--btn-font-size, 0.9375rem);
+  font-weight: var(--font-weight-semibold, 600);
+  font-family: inherit;
+  cursor: pointer;
+  background: var(--primary-color);
+  color: #fff;
+  border: none;
+}
+
+.manual-time-entry-compact {
+  text-align: center;
+  padding: var(--spacing-sm) 0;
+}
+
+.manual-time-entry-link-btn {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: var(--spacing-sm);
+  font-family: inherit;
+}
+
+.manual-time-entry-link-btn:hover {
+  color: var(--primary-dark);
+}
+
+@media (min-width: 769px) {
+  .manual-time-entry-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .manual-time-entry-open-btn,
+  .manual-time-entry-secondary-btn {
+    flex: 1;
+    min-width: 200px;
+  }
 }

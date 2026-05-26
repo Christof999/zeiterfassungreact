@@ -455,9 +455,6 @@
 }
 
 .time-entries-list .data-table thead {
-  position: sticky;
-  top: 0;
-  z-index: 10;
   background: var(--light-color);
 }
 
@@ -466,10 +463,21 @@
   border-bottom: 2px solid var(--border-color);
   padding: var(--spacing-md);
   font-weight: 600;
-  position: sticky;
-  top: 0;
-  z-index: 11;
-  box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+@media (min-width: 769px) {
+  .time-entries-list .data-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .time-entries-list .data-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 11;
+    box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1);
+  }
 }
 
 .document-item {

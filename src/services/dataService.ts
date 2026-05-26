@@ -10,6 +10,7 @@ import {
   writeBatch,
   query, 
   where, 
+  orderBy,
   limit,
   runTransaction,
   documentId,
@@ -18,9 +19,15 @@ import {
   arrayUnion
 } from 'firebase/firestore'
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth'
-import { db, auth } from './firebaseConfig'
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { db, auth, storage } from './firebaseConfig'
 import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement } from '../types'
 import { formatDateForInputLocal } from '../utils/dateUtils'
+import { withTimeout } from '../utils/withTimeout'
+import { sanitizeTimeEntryForRead } from '../utils/sanitizeTimeEntry'
+
+const STORAGE_UPLOAD_TIMEOUT_MS = 25_000
+const IMAGE_PREPARE_TIMEOUT_MS = 90_000
 
 const isDevMode = typeof import.meta !== 'undefined' && !!import.meta.env?.DEV
 
@@ -61,6 +68,12 @@ function collectFileReferenceIds(value: unknown, into: Set<string>, depth = 0): 
       if (typeof v === 'string' && v.trim() && !isPlaceholderFileUploadId(v.trim())) into.add(v.trim())
       if (typeof v === 'number' && Number.isFinite(v)) into.add(String(v))
     }
+    for (const key of ['imageIds', 'documentIds']) {
+      const arr = o[key]
+      if (Array.isArray(arr)) {
+        arr.forEach((id) => collectFileReferenceIds(id, into, depth + 1))
+      }
+    }
     for (const [k, v] of Object.entries(o)) {
       if (k === 'notes' || k === 'imageComment' || k === 'addedByName' || k === 'base64Data' || k === 'mimeType') {
         continue
@@ -70,18 +83,41 @@ function collectFileReferenceIds(value: unknown, into: Set<string>, depth = 0): 
   }
 }
 
+/** Firestore-Maximum pro String-Feld (base64Data) — etwas Puffer unter 1.048.487 Bytes */
+const FIRESTORE_MAX_BASE64_BYTES = 1_000_000
+const PROJECTS_CACHE_TTL_MS = 60_000
+
+export type FileUploadLoadOptions = { includeBinary?: boolean }
+
 class DataServiceClass {
   private authReadyPromise: Promise<void>
+  private projectsCache: { active: Project[] | null; all: Project[] | null; ts: number } = {
+    active: null,
+    all: null,
+    ts: 0
+  }
 
   constructor() {
     this.authReadyPromise = this.initAuth()
+  }
+
+  private invalidateProjectsCache(): void {
+    this.projectsCache = { active: null, all: null, ts: 0 }
+  }
+
+  private isProjectsCacheValid(): boolean {
+    return Date.now() - this.projectsCache.ts < PROJECTS_CACHE_TTL_MS
   }
 
   /** Einheitliche Abbildung fileUploads-Dokument → FileUpload (gleiche Base64-/URL-Logik wie getFileUploads). */
   private fileUploadFromDocData(
     docId: string,
     data: Record<string, unknown>,
-    opts?: { projectIdFallback?: string; fileTypeFallback?: string }
+    opts?: {
+      projectIdFallback?: string
+      fileTypeFallback?: string
+      includeBinary?: boolean
+    }
   ): FileUpload {
     const uploadTimeRaw = data.uploadTime
     const uploadTime =
@@ -91,15 +127,22 @@ class DataServiceClass {
           ? uploadTimeRaw
           : (uploadTimeRaw as any)?.toDate?.() || new Date((uploadTimeRaw as any) || Date.now())
 
-    let base64 = String(data.base64Data || data.base64String || data.base64 || '')
+    const includeBinary = opts?.includeBinary === true
+    let base64 = ''
     let fileUrl = String(data.url || data.filePath || '')
-    if (fileUrl.startsWith('data:')) {
-      const parts = fileUrl.split(',')
-      if (parts.length > 1) base64 = parts[1]
-    }
-    if (!base64 && typeof data.mimeType === 'string' && data.mimeType.includes(',')) {
-      const parts = data.mimeType.split(',')
-      if (parts.length > 1) base64 = parts[1]
+    if (includeBinary) {
+      base64 = String(data.base64Data || data.base64String || data.base64 || '')
+      if (fileUrl.startsWith('data:')) {
+        const parts = fileUrl.split(',')
+        if (parts.length > 1) base64 = parts[1]
+        fileUrl = ''
+      }
+      if (!base64 && typeof data.mimeType === 'string' && data.mimeType.includes(',')) {
+        const parts = data.mimeType.split(',')
+        if (parts.length > 1) base64 = parts[1]
+      }
+    } else if (fileUrl.startsWith('data:')) {
+      fileUrl = ''
     }
 
     let mimeType = String(data.mimeType || data.contentType || '')
@@ -222,23 +265,27 @@ class DataServiceClass {
   }
 
   // Project Management
-  async getActiveProjects(): Promise<Project[]> {
+  async getActiveProjects(forceRefresh = false): Promise<Project[]> {
     await this.authReadyPromise
+    if (!forceRefresh && this.projectsCache.active && this.isProjectsCacheValid()) {
+      return this.projectsCache.active
+    }
     try {
       const projectsRef = collection(db, 'projects')
       const snapshot = await getDocs(projectsRef)
-      let projects = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Project))
-      
-      projects = projects.filter(
-        (project) => {
-          const isActiveFlag = project.isActive !== false
-          const normalizedStatus = (project.status || '').toLowerCase()
-          const isActiveStatus = !project.status || normalizedStatus === 'active' || normalizedStatus === 'aktiv'
-          return isActiveFlag && isActiveStatus
-        }
-      )
-      
+      let projects = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Project))
+
+      projects = projects.filter((project) => {
+        const isActiveFlag = project.isActive !== false
+        const normalizedStatus = (project.status || '').toLowerCase()
+        const isActiveStatus =
+          !project.status || normalizedStatus === 'active' || normalizedStatus === 'aktiv'
+        return isActiveFlag && isActiveStatus
+      })
+
       projects.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      this.projectsCache.active = projects
+      this.projectsCache.ts = Date.now()
       return projects
     } catch (error) {
       console.error('Fehler beim Abrufen aktiver Projekte:', error)
@@ -283,7 +330,9 @@ class DataServiceClass {
       
       const snapshot = await getDocs(q)
       if (!snapshot.empty) {
-        const activeEntries = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as TimeEntry))
+        const activeEntries = snapshot.docs
+          .map((d) => ({ id: d.id, ...d.data() } as TimeEntry))
+          .filter((e) => e.clockOutTime == null)
         activeEntries.sort((a, b) => {
           const aDate = a.clockInTime instanceof Timestamp
             ? a.clockInTime.toDate()
@@ -298,8 +347,24 @@ class DataServiceClass {
           console.warn(`Mehrere offene Zeiteinträge für Mitarbeiter ${employeeId} gefunden:`, activeEntries.length)
         }
 
-        return activeEntries[0]
+        if (activeEntries.length > 0) {
+          return sanitizeTimeEntryForRead(activeEntries[0])
+        }
       }
+
+      const employeeRef = doc(db, 'employees', employeeId)
+      const employeeSnap = await getDoc(employeeRef)
+      const activeTimeEntryId = employeeSnap.data()?.activeTimeEntryId as string | undefined
+      if (activeTimeEntryId) {
+        const entrySnap = await getDoc(doc(db, 'timeEntries', activeTimeEntryId))
+        if (entrySnap.exists()) {
+          const data = entrySnap.data() as TimeEntry
+          if (data.clockOutTime == null) {
+            return sanitizeTimeEntryForRead({ ...data, id: entrySnap.id } as TimeEntry)
+          }
+        }
+      }
+
       return null
     } catch (error) {
       console.error('Fehler beim Abrufen des aktuellen Zeiteintrags:', error)
@@ -307,14 +372,51 @@ class DataServiceClass {
     }
   }
 
-  async getTimeEntriesByEmployeeId(employeeId: string): Promise<TimeEntry[]> {
+  async getTimeEntriesByEmployeeId(
+    employeeId: string,
+    opts?: { limit?: number }
+  ): Promise<TimeEntry[]> {
     await this.authReadyPromise
     try {
       const timeEntriesRef = collection(db, 'timeEntries')
-      const q = query(timeEntriesRef, where('employeeId', '==', employeeId))
-      const snapshot = await getDocs(q)
-      
-      return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as TimeEntry))
+      let snapshot
+      if (opts?.limit && opts.limit > 0) {
+        try {
+          const q = query(
+            timeEntriesRef,
+            where('employeeId', '==', employeeId),
+            orderBy('clockInTime', 'desc'),
+            limit(opts.limit)
+          )
+          snapshot = await getDocs(q)
+        } catch (indexError) {
+          if (isDevMode) {
+            console.warn(
+              'Firestore-Index für clockInTime fehlt, Fallback ohne orderBy:',
+              indexError
+            )
+          }
+          const q = query(timeEntriesRef, where('employeeId', '==', employeeId))
+          snapshot = await getDocs(q)
+        }
+      } else {
+        snapshot = await getDocs(query(timeEntriesRef, where('employeeId', '==', employeeId)))
+      }
+
+      let entries = snapshot.docs.map((d) =>
+        sanitizeTimeEntryForRead({ id: d.id, ...d.data() } as TimeEntry)
+      )
+
+      if (opts?.limit && opts.limit > 0 && entries.length > opts.limit) {
+        entries.sort((a, b) => {
+          const aT = this.convertToDate(a.clockInTime).getTime()
+          const bT = this.convertToDate(b.clockInTime).getTime()
+          return bT - aT
+        })
+        entries = entries.slice(0, opts.limit)
+      }
+
+      return entries
     } catch (error) {
       console.error('Fehler beim Abrufen der Zeiteinträge:', error)
       return []
@@ -520,6 +622,97 @@ class DataServiceClass {
       })
     } catch (error) {
       console.error('Fehler beim Ausstempeln:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Aktives Projekt wechseln: aktuellen Eintrag ohne Pause ausstempeln, sofort auf neuem Projekt einstempeln.
+   */
+  async switchActiveProject(
+    employeeId: string,
+    currentTimeEntryId: string,
+    newProjectId: string,
+    location: { lat: number | null; lng: number | null } | null
+  ): Promise<TimeEntry> {
+    await this.authReadyPromise
+    try {
+      if (!employeeId || !currentTimeEntryId || !newProjectId) {
+        throw new Error('Mitarbeiter, Zeiteintrag und neues Projekt sind erforderlich')
+      }
+
+      const currentRef = doc(db, 'timeEntries', currentTimeEntryId)
+      const employeeRef = doc(db, 'employees', employeeId)
+      const newEntryRef = doc(collection(db, 'timeEntries'))
+
+      await runTransaction(db, async (transaction) => {
+        const [currentSnap, employeeSnap] = await Promise.all([
+          transaction.get(currentRef),
+          transaction.get(employeeRef)
+        ])
+
+        if (!currentSnap.exists()) {
+          throw new Error('Aktueller Zeiteintrag nicht gefunden')
+        }
+        if (!employeeSnap.exists()) {
+          throw new Error('Mitarbeiter nicht gefunden')
+        }
+
+        const current = currentSnap.data() as TimeEntry
+        if (current.clockOutTime != null) {
+          throw new Error('Sie sind nicht mehr eingestempelt')
+        }
+        if (current.projectId === newProjectId) {
+          throw new Error('Bitte wählen Sie ein anderes Projekt')
+        }
+
+        const employeeData = employeeSnap.data() as { activeTimeEntryId?: string }
+        if (employeeData.activeTimeEntryId && employeeData.activeTimeEntryId !== currentTimeEntryId) {
+          throw new Error('Aktiver Stempelsatz stimmt nicht überein. Bitte Seite neu laden.')
+        }
+
+        const clockOutTime = Timestamp.now()
+        const clockInTime = clockOutTime
+        const existingNotes = (current.notes || '').trim()
+        const switchNote = 'Projektwechsel'
+        const notes = existingNotes ? `${existingNotes} | ${switchNote}` : switchNote
+
+        const clockOutUpdate: Record<string, unknown> = {
+          clockOutTime,
+          pauseTotalTime: 0,
+          notes,
+          projectSwitchOut: true
+        }
+        if (location) {
+          clockOutUpdate.clockOutLocation = location
+          clockOutUpdate.locationOut = location
+        }
+        transaction.update(currentRef, clockOutUpdate)
+
+        const newEntryData: Record<string, unknown> = {
+          entryId: newEntryRef.id,
+          employeeId,
+          projectId: newProjectId,
+          clockInTime,
+          clockOutTime: null,
+          clockInLocation: location,
+          notes: '',
+          pauseTotalTime: 0,
+          projectSwitchIn: true
+        }
+        transaction.set(newEntryRef, newEntryData)
+
+        transaction.update(employeeRef, {
+          activeTimeEntryId: newEntryRef.id,
+          activeClockInAt: clockInTime,
+          updatedAt: new Date()
+        })
+      })
+
+      const newSnap = await getDoc(newEntryRef)
+      return { id: newEntryRef.id, ...newSnap.data() } as TimeEntry
+    } catch (error) {
+      console.error('Fehler beim Projektwechsel:', error)
       throw error
     }
   }
@@ -746,7 +939,30 @@ class DataServiceClass {
     }
   }
 
-  // File Upload
+  private buildStorageObjectPath(
+    projectId: string,
+    employeeId: string,
+    type: string,
+    fileName: string
+  ): string {
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'upload.jpg'
+    return `uploads/${projectId}/${employeeId}/${Date.now()}_${type}_${safeName}`
+  }
+
+  private async uploadFileToStorage(file: File, objectPath: string): Promise<string> {
+    const objectRef = storageRef(storage, objectPath)
+    await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' })
+    return getDownloadURL(objectRef)
+  }
+
+  private async prepareFileForStorageUpload(file: File, type: string): Promise<File> {
+    const isDocument = this.isDocumentFileType(type)
+    // Auf Mobilgeräten schneller, in Storage trotzdem deutlich schärfer als früher
+    const maxWidth = isDocument ? 2400 : 1800
+    return this.compressImage(file, isDocument ? 0.9 : 0.85, maxWidth, { forceJpeg: true })
+  }
+
+  // File Upload — bevorzugt Firebase Storage (volle Qualität), Fallback Base64 in Firestore
   async uploadFile(
     file: File,
     projectId: string,
@@ -754,31 +970,67 @@ class DataServiceClass {
     type: string = 'construction_site',
     notes: string = '',
     comment: string = '',
-    options?: { timeEntryId?: string }
+    options?: { timeEntryId?: string; onProgress?: (message: string) => void }
   ): Promise<FileUpload> {
     await this.authReadyPromise
+    const report = (msg: string) => options?.onProgress?.(msg)
     try {
-      // Komprimiere Bild
-      const compressedFile = await this.compressImage(file, 0.5, 600)
-      
-      // Konvertiere zu Base64
-      const base64DataUrl = await this.fileToBase64(compressedFile)
-      const base64String = base64DataUrl.split(',')[1]
-      const mimeType = base64DataUrl.split(',')[0].split(':')[1].split(';')[0]
-
-      // Speichere in Firestore
       const fileUploadsRef = collection(db, 'fileUploads')
-      const uploadDataRaw: Record<string, unknown> = {
-        fileName: file.name,
-        fileType: type,
-        projectId,
-        employeeId,
-        base64Data: base64String,
-        mimeType,
-        notes,
-        imageComment: comment,
-        uploadTime: serverTimestamp()
+      let uploadDataRaw: Record<string, unknown>
+      let preparedFile: File
+
+      try {
+        report('Bild wird vorbereitet…')
+        preparedFile = await withTimeout(
+          this.prepareFileForStorageUpload(file, type),
+          IMAGE_PREPARE_TIMEOUT_MS,
+          'Die Bildaufbereitung hat zu lange gedauert.'
+        )
+        const objectPath = this.buildStorageObjectPath(
+          projectId,
+          employeeId,
+          type,
+          preparedFile.name
+        )
+        report('Wird in Firebase Storage hochgeladen…')
+        const downloadUrl = await withTimeout(
+          this.uploadFileToStorage(preparedFile, objectPath),
+          STORAGE_UPLOAD_TIMEOUT_MS,
+          'Storage-Upload Zeitüberschreitung'
+        )
+        uploadDataRaw = {
+          fileName: file.name,
+          fileType: type,
+          projectId,
+          employeeId,
+          filePath: downloadUrl,
+          storagePath: objectPath,
+          mimeType: preparedFile.type,
+          notes,
+          imageComment: comment,
+          uploadTime: serverTimestamp()
+        }
+      } catch (storageError) {
+        console.warn('Storage-Upload fehlgeschlagen, Fallback Firestore Base64:', storageError)
+        report('Speichere komprimiert in der Datenbank…')
+        const { base64: base64String, mimeType } = await withTimeout(
+          this.compressImageForFirestoreUpload(file, type),
+          IMAGE_PREPARE_TIMEOUT_MS,
+          'Die Bildkomprimierung hat zu lange gedauert.'
+        )
+        uploadDataRaw = {
+          fileName: file.name,
+          fileType: type,
+          projectId,
+          employeeId,
+          base64Data: base64String,
+          mimeType,
+          notes,
+          imageComment: comment,
+          uploadTime: serverTimestamp()
+        }
       }
+
       if (options?.timeEntryId) {
         uploadDataRaw.timeEntryId = options.timeEntryId
       }
@@ -786,20 +1038,23 @@ class DataServiceClass {
         Object.entries(uploadDataRaw).filter(([, v]) => v !== undefined)
       )
 
+      report('Metadaten werden gespeichert…')
       const docRef = await addDoc(fileUploadsRef, uploadData)
       const uploadDoc = await getDoc(docRef)
-      
+      const saved = uploadDoc.data() || {}
+
       return {
         id: docRef.id,
         fileName: file.name,
-        filePath: '', // Wird nicht verwendet bei Base64
+        filePath: String(saved.filePath || ''),
         fileType: type,
         projectId,
         employeeId,
         timeEntryId: options?.timeEntryId,
         uploadTime: uploadDoc.data()?.uploadTime || new Date(),
         notes,
-        imageComment: comment
+        imageComment: comment,
+        mimeType: String(saved.mimeType || '')
       } as FileUpload
     } catch (error) {
       console.error('Fehler beim Hochladen der Datei:', error)
@@ -807,7 +1062,68 @@ class DataServiceClass {
     }
   }
 
-  private async compressImage(file: File, quality: number, maxWidth: number): Promise<File> {
+  private isDocumentFileType(type: string): boolean {
+    return type === 'invoice' || type === 'delivery_note' || type === 'document'
+  }
+
+  private async fileToBase64Parts(file: File): Promise<{ base64: string; mimeType: string }> {
+    const dataUrl = await this.fileToBase64(file)
+    const base64 = dataUrl.split(',')[1] || ''
+    const mimeType =
+      dataUrl.split(',')[0]?.split(':')[1]?.split(';')[0] || file.type || 'image/jpeg'
+    return { base64, mimeType }
+  }
+
+  /**
+   * Komprimiert so stark wie nötig, damit base64Data in Firestore passt (~1 MiB pro Feld).
+   * Startet mit hoher Qualität und reduziert schrittweise Breite/Qualität.
+   */
+  private async compressImageForFirestoreUpload(
+    file: File,
+    type: string
+  ): Promise<{ base64: string; mimeType: string }> {
+    const isDocument = this.isDocumentFileType(type)
+    let quality = isDocument ? 0.88 : 0.8
+    let maxWidth = isDocument ? 1800 : 1400
+    const minQuality = 0.42
+    const minWidth = 640
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const compressed = await this.compressImage(file, quality, maxWidth, {
+        forceJpeg: true
+      })
+      const { base64, mimeType } = await this.fileToBase64Parts(compressed)
+
+      if (base64.length <= FIRESTORE_MAX_BASE64_BYTES) {
+        if (isDevMode && attempt > 0) {
+          console.log(
+            `Bild komprimiert (${attempt + 1}. Versuch): ${Math.round(base64.length / 1024)} KB`
+          )
+        }
+        return { base64, mimeType }
+      }
+
+      if (quality > minQuality + 0.08) {
+        quality -= 0.1
+      } else if (maxWidth > minWidth) {
+        maxWidth = Math.max(minWidth, Math.round(maxWidth * 0.72))
+        quality = isDocument ? 0.78 : 0.7
+      } else {
+        break
+      }
+    }
+
+    throw new Error(
+      'Das Bild ist zu groß für die Datenbank (max. ca. 1 MB pro Foto). Bitte näher heranzoomen, weniger Bilder auf einmal speichern oder die Kamera-Auflösung reduzieren.'
+    )
+  }
+
+  private async compressImage(
+    file: File,
+    quality: number,
+    maxWidth: number,
+    options?: { forceJpeg?: boolean }
+  ): Promise<File> {
     return new Promise((resolve) => {
       const reader = new FileReader()
       reader.onload = (e) => {
@@ -817,25 +1133,34 @@ class DataServiceClass {
           let width = img.width
           let height = img.height
 
+          const maxHeight = Math.round(maxWidth * 1.35)
           if (width > maxWidth) {
             height = (height * maxWidth) / width
             width = maxWidth
           }
+          if (height > maxHeight) {
+            width = (width * maxHeight) / height
+            height = maxHeight
+          }
 
-          canvas.width = width
-          canvas.height = height
+          canvas.width = Math.round(width)
+          canvas.height = Math.round(height)
           const ctx = canvas.getContext('2d')!
-          ctx.drawImage(img, 0, 0, width, height)
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
 
+          const outputType =
+            options?.forceJpeg || !file.type.includes('png') ? 'image/jpeg' : 'image/png'
           canvas.toBlob(
             (blob) => {
               if (blob) {
-                resolve(new File([blob], file.name, { type: file.type }))
+                const ext = outputType === 'image/png' ? '.png' : '.jpg'
+                const baseName = file.name.replace(/\.[^.]+$/, '') || 'upload'
+                resolve(new File([blob], `${baseName}${ext}`, { type: outputType }))
               } else {
                 resolve(file)
               }
             },
-            file.type,
+            outputType,
             quality
           )
         }
@@ -876,8 +1201,19 @@ class DataServiceClass {
         throw new Error('Zeiteintrag nicht gefunden')
       }
 
+      // Nur IDs + Text — keine Bilddaten im timeEntry (Firestore-Max. 1 MiB pro Dokument)
       const newDocumentation = {
-        ...documentationData,
+        notes: documentationData.notes || '',
+        photoCount: documentationData.photoCount,
+        documentCount: documentationData.documentCount,
+        addedBy: documentationData.addedBy,
+        addedByName: documentationData.addedByName,
+        imageIds: (documentationData.images || [])
+          .map((img: { id?: string }) => img?.id)
+          .filter((id): id is string => !!id),
+        documentIds: (documentationData.documents || [])
+          .map((doc: { id?: string }) => doc?.id)
+          .filter((id): id is string => !!id),
         timestamp: Timestamp.now()
       }
 
@@ -1294,12 +1630,18 @@ class DataServiceClass {
   }
 
   // Admin: Alle Projekte abrufen
-  async getAllProjects(): Promise<Project[]> {
+  async getAllProjects(forceRefresh = false): Promise<Project[]> {
     await this.authReadyPromise
+    if (!forceRefresh && this.projectsCache.all && this.isProjectsCacheValid()) {
+      return this.projectsCache.all
+    }
     try {
       const projectsRef = collection(db, 'projects')
       const snapshot = await getDocs(projectsRef)
-      return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Project))
+      const projects = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Project))
+      this.projectsCache.all = projects
+      this.projectsCache.ts = Date.now()
+      return projects
     } catch (error) {
       console.error('Fehler beim Abrufen aller Projekte:', error)
       return []
@@ -1320,6 +1662,7 @@ class DataServiceClass {
         Object.entries(raw).filter(([, value]) => value !== undefined)
       )
       const docRef = await addDoc(projectsRef, payload)
+      this.invalidateProjectsCache()
       return docRef.id
     } catch (error) {
       console.error('Fehler beim Erstellen des Projekts:', error)
@@ -1342,6 +1685,7 @@ class DataServiceClass {
         Object.entries(projectData).filter(([, value]) => value !== undefined)
       )
       await updateDoc(projectRef, payload)
+      this.invalidateProjectsCache()
     } catch (error) {
       console.error(`Fehler beim Aktualisieren des Projekts ${id}:`, error)
       throw error
@@ -1356,6 +1700,7 @@ class DataServiceClass {
         status: 'archived',
         isActive: false 
       })
+      this.invalidateProjectsCache()
     } catch (error) {
       console.error(`Fehler beim Löschen des Projekts ${id}:`, error)
       throw error
@@ -1753,17 +2098,42 @@ class DataServiceClass {
       const timeEntriesRef = collection(db, 'timeEntries')
       const q = query(timeEntriesRef, where('projectId', '==', projectId))
       const snapshot = await getDocs(q)
-      
-      return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as TimeEntry))
+
+      return snapshot.docs.map((d) =>
+        sanitizeTimeEntryForRead({ id: d.id, ...d.data() } as TimeEntry)
+      )
     } catch (error) {
       console.error(`Fehler beim Abrufen der Zeiteinträge für Projekt ${projectId}:`, error)
       return []
     }
   }
 
-  // Projekt-Dateien laden (wie in der alten App - aus Zeiteinträgen und zusätzlich direkt per projectId)
-  async getProjectFiles(projectId: string, type: string = 'construction_site'): Promise<FileUpload[]> {
+  async getFileUploadById(
+    id: string,
+    opts?: FileUploadLoadOptions
+  ): Promise<FileUpload | null> {
     await this.authReadyPromise
+    if (!id?.trim() || isPlaceholderFileUploadId(id)) return null
+    try {
+      const snap = await getDoc(doc(db, 'fileUploads', id.trim()))
+      if (!snap.exists()) return null
+      return this.fileUploadFromDocData(snap.id, snap.data() as Record<string, unknown>, {
+        includeBinary: opts?.includeBinary === true
+      })
+    } catch (error) {
+      console.error(`Fehler beim Laden von fileUpload ${id}:`, error)
+      return null
+    }
+  }
+
+  // Projekt-Dateien laden (wie in der alten App - aus Zeiteinträgen und zusätzlich direkt per projectId)
+  async getProjectFiles(
+    projectId: string,
+    type: string = 'construction_site',
+    opts?: FileUploadLoadOptions
+  ): Promise<FileUpload[]> {
+    await this.authReadyPromise
+    const includeBinary = opts?.includeBinary === true
     try {
       if (!projectId) {
         console.error('Keine Projekt-ID angegeben')
@@ -1771,6 +2141,25 @@ class DataServiceClass {
       }
 
       const normalizedType = type === 'photo' ? 'construction_site' : type
+      const files: FileUpload[] = []
+      const seenIds = new Set<string>()
+
+      try {
+        const uploadsByProject = await this.getFileUploads(projectId, undefined, {
+          includeBinary
+        })
+        for (const u of uploadsByProject) {
+          if (u.id && !seenIds.has(u.id)) {
+            seenIds.add(u.id)
+            files.push(u)
+          }
+        }
+      } catch (extraErr) {
+        if (isDevMode) {
+          console.warn('Konnte Dateien über projectId nicht laden:', extraErr)
+        }
+      }
+
       const timeEntries = await this.getTimeEntriesByProject(projectId)
       if (!timeEntries || timeEntries.length === 0) {
         if (isDevMode) {
@@ -1862,18 +2251,17 @@ class DataServiceClass {
       // Alle Uploads mit timeEntryId zu Stempelsätzen dieses Projekts (falls Arrays im Eintrag unvollständig sind)
       const entryIdsForProject = timeEntries.map((e) => e.id).filter(Boolean) as string[]
       if (entryIdsForProject.length > 0) {
-        const linkedByTimeEntry = await this.getFileUploadsByTimeEntryIds(entryIdsForProject)
+        const linkedByTimeEntry = await this.getFileUploadsByTimeEntryIds(entryIdsForProject, {
+          includeBinary
+        })
         for (const u of linkedByTimeEntry) {
           if (u.id) fileIds.push(u.id)
         }
       }
 
-      // Entferne Duplikate
-      fileIds = [...new Set(fileIds)]
+      // Entferne Duplikate und bereits geladene IDs
+      fileIds = [...new Set(fileIds)].filter((id) => !seenIds.has(id))
 
-      // Lade Dateien aus fileUploads Collection basierend auf IDs
-      const files: FileUpload[] = []
-      
       if (fileIds.length > 0) {
         if (isDevMode) {
           console.log(`Lade ${fileIds.length} Dateien für Projekt ${projectId}, Typ: ${normalizedType}`)
@@ -1892,9 +2280,11 @@ class DataServiceClass {
             files.push(
               this.fileUploadFromDocData(fileDoc.id, data, {
                 projectIdFallback: projectId,
-                fileTypeFallback: normalizedType
+                fileTypeFallback: normalizedType,
+                includeBinary
               })
             )
+            seenIds.add(fileDoc.id)
           })
 
           if (isDevMode && chunkSnapshot.size < chunk.length) {
@@ -1910,32 +2300,21 @@ class DataServiceClass {
         }
       }
 
-      // Zusätzliche Dateien direkt über projectId (falls nicht in Zeiteinträgen referenziert)
-      try {
-        const uploadsByProject = await this.getFileUploads(projectId)
-        if (isDevMode) {
-          console.log(`Zusätzliche Dateien direkt über projectId (${projectId}):`, uploadsByProject.length)
-        }
-        uploadsByProject.forEach((u) => files.push(u))
-      } catch (extraErr) {
-        if (isDevMode) {
-          console.warn('Konnte zusätzliche Dateien über projectId nicht laden:', extraErr)
-        }
-      }
-
-      // Füge direkte Dateien hinzu
+      // Füge direkte Dateien hinzu (Legacy in Zeiteinträgen eingebettet)
       directFiles.forEach((file) => {
+        const filePath = String(file.url || file.filePath || '')
+        const legacyBase64 = includeBinary ? file.base64Data || file.base64 : undefined
         files.push({
           id: file.id || `direct-${Date.now()}-${Math.random()}`,
           fileName: file.fileName || file.name || 'Unbekannt',
-          filePath: file.url || file.filePath || '',
+          filePath: filePath.startsWith('data:') ? '' : filePath,
           fileType: file.fileType || normalizedType,
           projectId: file.projectId || projectId,
           employeeId: file.employeeId || '',
           uploadTime: file.timestamp ? this.convertToDate(file.timestamp) : new Date(),
           notes: file.notes || file.comment || '',
           imageComment: file.imageComment || file.comment || '',
-          base64Data: file.base64Data || file.base64,
+          base64Data: legacyBase64,
           mimeType: file.mimeType || file.type || 'image/jpeg'
         } as FileUpload)
       })
@@ -2004,11 +2383,11 @@ class DataServiceClass {
       })
 
       // Dedupliziere nach id (falls über Zeiteinträge + direct + projectId doppelt)
-      const seenIds = new Set<string>()
+      const dedupeKeys = new Set<string>()
       filteredFiles = filteredFiles.filter((f) => {
         const key = f.id || `${f.fileName}-${f.projectId}`
-        if (seenIds.has(key)) return false
-        seenIds.add(key)
+        if (dedupeKeys.has(key)) return false
+        dedupeKeys.add(key)
         return true
       })
 
@@ -2067,9 +2446,13 @@ class DataServiceClass {
   }
 
   /** Alle fileUploads, die explizit an einen Stempelsatz gebunden sind (auch wenn projectId/Arrays abweichen). */
-  async getFileUploadsByTimeEntryIds(timeEntryIds: string[]): Promise<FileUpload[]> {
+  async getFileUploadsByTimeEntryIds(
+    timeEntryIds: string[],
+    opts?: FileUploadLoadOptions
+  ): Promise<FileUpload[]> {
     await this.authReadyPromise
     if (!timeEntryIds || timeEntryIds.length === 0) return []
+    const includeBinary = opts?.includeBinary === true
     const out: FileUpload[] = []
     const chunkSize = 10
     for (let i = 0; i < timeEntryIds.length; i += chunkSize) {
@@ -2082,7 +2465,10 @@ class DataServiceClass {
         snapshot.docs.forEach((fileDoc) => {
           const data = fileDoc.data() as Record<string, unknown>
           out.push(
-            this.fileUploadFromDocData(fileDoc.id, data, { fileTypeFallback: 'construction_site' })
+            this.fileUploadFromDocData(fileDoc.id, data, {
+              fileTypeFallback: 'construction_site',
+              includeBinary
+            })
           )
         })
       } catch (e) {
@@ -2092,7 +2478,11 @@ class DataServiceClass {
     return out
   }
 
-  async getFileUploads(projectId?: string, type?: string): Promise<FileUpload[]> {
+  async getFileUploads(
+    projectId?: string,
+    type?: string,
+    opts?: FileUploadLoadOptions
+  ): Promise<FileUpload[]> {
     await this.authReadyPromise
     try {
       const fileUploadsRef = collection(db, 'fileUploads')
@@ -2123,13 +2513,15 @@ class DataServiceClass {
           console.log(`🔥 FIRESTORE DOC #${index} (${doc.id}) - DATEN:`, JSON.stringify(dataCopy, null, 2))
         }
 
-        return this.fileUploadFromDocData(doc.id, data)
+        return this.fileUploadFromDocData(doc.id, data, {
+          includeBinary: opts?.includeBinary === true
+        })
       })
-      
+
       if (type) {
-        uploads = uploads.filter(upload => upload.fileType === type)
+        uploads = uploads.filter((upload) => upload.fileType === type)
       }
-      
+
       return uploads
     } catch (error) {
       console.error('Fehler beim Abrufen der Datei-Uploads:', error)

@@ -4,15 +4,31 @@ import type { Project } from '../types'
 import '../styles/ClockInForm.css'
 
 interface ClockInFormProps {
-  onClockIn: (projectId: string) => void
+  onClockIn: (projectId: string) => void | Promise<void>
+  /** Bereits vom Parent geladene Projekte (sofortige Auswahl ohne Nachladen). */
+  projects?: Project[]
+  isSubmitting?: boolean
 }
 
-const ClockInForm: React.FC<ClockInFormProps> = ({ onClockIn }) => {
-  const [projects, setProjects] = useState<Project[]>([])
+const ClockInForm: React.FC<ClockInFormProps> = ({
+  onClockIn,
+  projects: projectsFromParent,
+  isSubmitting = false
+}) => {
+  const [projects, setProjects] = useState<Project[]>(projectsFromParent ?? [])
   const [selectedProjectId, setSelectedProjectId] = useState('')
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(!projectsFromParent?.length)
 
   useEffect(() => {
+    if (projectsFromParent !== undefined) {
+      setProjects(projectsFromParent)
+      setIsLoading(false)
+    }
+  }, [projectsFromParent])
+
+  useEffect(() => {
+    if (projectsFromParent?.length) return
+
     const loadProjects = async () => {
       try {
         const activeProjects = await DataService.getActiveProjects()
@@ -25,17 +41,21 @@ const ClockInForm: React.FC<ClockInFormProps> = ({ onClockIn }) => {
     }
 
     loadProjects()
-  }, [])
+  }, [projectsFromParent])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (selectedProjectId) {
-      onClockIn(selectedProjectId)
+    if (selectedProjectId && !isSubmitting) {
+      await onClockIn(selectedProjectId)
     }
   }
 
   if (isLoading) {
     return <div className="loading">Projekte werden geladen...</div>
+  }
+
+  if (projects.length === 0) {
+    return <p className="clock-in-empty">Keine aktiven Projekte verfügbar.</p>
   }
 
   return (
@@ -48,6 +68,7 @@ const ClockInForm: React.FC<ClockInFormProps> = ({ onClockIn }) => {
             value={selectedProjectId}
             onChange={(e) => setSelectedProjectId(e.target.value)}
             required
+            disabled={isSubmitting}
           >
             <option value="" disabled>Bitte wählen</option>
             {projects.map((project) => (
@@ -57,8 +78,8 @@ const ClockInForm: React.FC<ClockInFormProps> = ({ onClockIn }) => {
             ))}
           </select>
         </div>
-        <button type="submit" className="btn primary-btn">
-          Einstempeln
+        <button type="submit" className="btn primary-btn" disabled={isSubmitting}>
+          {isSubmitting ? 'Einstempeln…' : 'Einstempeln'}
         </button>
       </form>
     </div>
