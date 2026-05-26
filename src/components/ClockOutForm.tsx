@@ -4,6 +4,7 @@ import type { TimeEntry, Project, Employee, Vehicle, VehicleUsage } from '../typ
 import VehicleBookingModal from './VehicleBookingModal'
 import ExtendedClockOutModal from './ExtendedClockOutModal'
 import LiveDocumentationModal from './LiveDocumentationModal'
+import ProjectSwitchModal from './ProjectSwitchModal'
 import { toast } from './ToastContainer'
 import '../styles/ClockOutForm.css'
 
@@ -14,6 +15,7 @@ interface ClockOutFormProps {
   onSimpleClockOut: (pauseMinutes: number) => void
   onExtendedClockOutSuccess: () => void
   onUpdate: () => void
+  onProjectSwitch: (newProjectId: string) => Promise<void>
 }
 
 const ClockOutForm: React.FC<ClockOutFormProps> = ({
@@ -22,9 +24,11 @@ const ClockOutForm: React.FC<ClockOutFormProps> = ({
   clockInTime,
   onSimpleClockOut,
   onExtendedClockOutSuccess,
-  onUpdate
+  onUpdate,
+  onProjectSwitch
 }) => {
   const [showVehicleModal, setShowVehicleModal] = useState(false)
+  const [showProjectSwitchModal, setShowProjectSwitchModal] = useState(false)
   const [showExtendedModal, setShowExtendedModal] = useState(false)
   const [showLiveDocModal, setShowLiveDocModal] = useState(false)
   const [vehicleBookings, setVehicleBookings] = useState<VehicleUsage[]>([])
@@ -164,7 +168,8 @@ const ClockOutForm: React.FC<ClockOutFormProps> = ({
           autoComplete="off"
         />
         <p className="pause-input-hint">
-          Pflichtangabe zum Ausstempeln. Ohne Pause: <strong>0</strong> eintragen.
+          Pflichtangabe nur beim Ausstempeln (einfach oder mit Dokumentation). Beim{' '}
+          <strong>Projekt wechseln</strong> ist keine Pause nötig.
         </p>
       </div>
 
@@ -194,6 +199,13 @@ const ClockOutForm: React.FC<ClockOutFormProps> = ({
       )}
 
       <div className="clock-out-buttons">
+        <button
+          type="button"
+          onClick={() => setShowProjectSwitchModal(true)}
+          className="btn project-switch-btn"
+        >
+          Projekt wechseln
+        </button>
         <button type="button" onClick={handleSimpleClockOutClick} className="btn secondary-btn">
           Einfach Ausstempeln
         </button>
@@ -258,6 +270,15 @@ const ClockOutForm: React.FC<ClockOutFormProps> = ({
             setShowLiveDocModal(false)
             onUpdate()
           }}
+        />
+      )}
+
+      {showProjectSwitchModal && (
+        <ProjectSwitchModal
+          currentProjectId={timeEntry.projectId}
+          currentProjectName={project?.name}
+          onClose={() => setShowProjectSwitchModal(false)}
+          onSwitch={onProjectSwitch}
         />
       )}
     </div>

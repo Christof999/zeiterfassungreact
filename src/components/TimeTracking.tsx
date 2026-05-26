@@ -100,6 +100,41 @@ const TimeTracking: React.FC = () => {
     }
   }
 
+  const handleProjectSwitch = async (newProjectId: string) => {
+    if (!currentTimeEntry || !currentUser?.id) return
+
+    try {
+      const location = await getCurrentLocation()
+      const timeEntry = await DataService.switchActiveProject(
+        currentUser.id,
+        currentTimeEntry.id,
+        newProjectId,
+        location
+      )
+
+      const project = await DataService.getProjectById(newProjectId)
+      setCurrentTimeEntry(timeEntry)
+      setCurrentProject(project)
+
+      const clockIn =
+        timeEntry.clockInTime instanceof Date
+          ? timeEntry.clockInTime
+          : timeEntry.clockInTime?.toDate?.() || new Date()
+      setClockInTime(clockIn)
+      setActivitiesRefreshKey((k) => k + 1)
+
+      toast.success(
+        project?.name
+          ? `Projekt gewechselt: ${project.name}`
+          : 'Projekt wurde gewechselt'
+      )
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unbekannter Fehler'
+      toast.error('Projektwechsel fehlgeschlagen: ' + msg)
+      throw error
+    }
+  }
+
   const handleSimpleClockOut = async (pauseMinutes: number) => {
     if (!currentTimeEntry) return
 
@@ -236,6 +271,7 @@ const TimeTracking: React.FC = () => {
             clockInTime={clockInTime}
             onSimpleClockOut={handleSimpleClockOut}
             onExtendedClockOutSuccess={resetClockOutState}
+            onProjectSwitch={handleProjectSwitch}
             onUpdate={() => {
               // Reload time entry inkl. Anzeigezustand
               DataService.getCurrentTimeEntry(currentUser.id!).then(async (entry) => {

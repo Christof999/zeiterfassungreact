@@ -538,6 +538,97 @@ class DataServiceClass {
     }
   }
 
+  /**
+   * Aktives Projekt wechseln: aktuellen Eintrag ohne Pause ausstempeln, sofort auf neuem Projekt einstempeln.
+   */
+  async switchActiveProject(
+    employeeId: string,
+    currentTimeEntryId: string,
+    newProjectId: string,
+    location: { lat: number | null; lng: number | null } | null
+  ): Promise<TimeEntry> {
+    await this.authReadyPromise
+    try {
+      if (!employeeId || !currentTimeEntryId || !newProjectId) {
+        throw new Error('Mitarbeiter, Zeiteintrag und neues Projekt sind erforderlich')
+      }
+
+      const currentRef = doc(db, 'timeEntries', currentTimeEntryId)
+      const employeeRef = doc(db, 'employees', employeeId)
+      const newEntryRef = doc(collection(db, 'timeEntries'))
+
+      await runTransaction(db, async (transaction) => {
+        const [currentSnap, employeeSnap] = await Promise.all([
+          transaction.get(currentRef),
+          transaction.get(employeeRef)
+        ])
+
+        if (!currentSnap.exists()) {
+          throw new Error('Aktueller Zeiteintrag nicht gefunden')
+        }
+        if (!employeeSnap.exists()) {
+          throw new Error('Mitarbeiter nicht gefunden')
+        }
+
+        const current = currentSnap.data() as TimeEntry
+        if (current.clockOutTime != null) {
+          throw new Error('Sie sind nicht mehr eingestempelt')
+        }
+        if (current.projectId === newProjectId) {
+          throw new Error('Bitte wählen Sie ein anderes Projekt')
+        }
+
+        const employeeData = employeeSnap.data() as { activeTimeEntryId?: string }
+        if (employeeData.activeTimeEntryId && employeeData.activeTimeEntryId !== currentTimeEntryId) {
+          throw new Error('Aktiver Stempelsatz stimmt nicht überein. Bitte Seite neu laden.')
+        }
+
+        const clockOutTime = Timestamp.now()
+        const clockInTime = clockOutTime
+        const existingNotes = (current.notes || '').trim()
+        const switchNote = 'Projektwechsel'
+        const notes = existingNotes ? `${existingNotes} | ${switchNote}` : switchNote
+
+        const clockOutUpdate: Record<string, unknown> = {
+          clockOutTime,
+          pauseTotalTime: 0,
+          notes,
+          projectSwitchOut: true
+        }
+        if (location) {
+          clockOutUpdate.clockOutLocation = location
+          clockOutUpdate.locationOut = location
+        }
+        transaction.update(currentRef, clockOutUpdate)
+
+        const newEntryData: Record<string, unknown> = {
+          entryId: newEntryRef.id,
+          employeeId,
+          projectId: newProjectId,
+          clockInTime,
+          clockOutTime: null,
+          clockInLocation: location,
+          notes: '',
+          pauseTotalTime: 0,
+          projectSwitchIn: true
+        }
+        transaction.set(newEntryRef, newEntryData)
+
+        transaction.update(employeeRef, {
+          activeTimeEntryId: newEntryRef.id,
+          activeClockInAt: clockInTime,
+          updatedAt: new Date()
+        })
+      })
+
+      const newSnap = await getDoc(newEntryRef)
+      return { id: newEntryRef.id, ...newSnap.data() } as TimeEntry
+    } catch (error) {
+      console.error('Fehler beim Projektwechsel:', error)
+      throw error
+    }
+  }
+
   async updateTimeEntry(timeEntryId: string, updateData: Partial<TimeEntry>): Promise<void> {
     await this.authReadyPromise
     try {
