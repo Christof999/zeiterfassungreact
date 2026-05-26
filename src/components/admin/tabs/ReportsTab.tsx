@@ -287,7 +287,9 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
 
       const entryIds = filteredEntries.map(e => e.id)
       const linkedFiles =
-        entryIds.length > 0 ? await DataService.getFileUploadsByTimeEntryIds(entryIds) : []
+        entryIds.length > 0
+          ? await DataService.getFileUploadsByTimeEntryIds(entryIds, { includeBinary: true })
+          : []
       const filesByEntryId = new Map<string, FileUpload[]>()
       for (const file of linkedFiles) {
         if (!file.timeEntryId) continue
@@ -814,8 +816,10 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       // Fotos und Dokumente laden
       try {
         const [photos, docs] = await Promise.all([
-          DataService.getProjectFiles(selectedProjectId, 'construction_site'),
-          DataService.getProjectFiles(selectedProjectId, 'document')
+          DataService.getProjectFiles(selectedProjectId, 'construction_site', {
+            includeBinary: true
+          }),
+          DataService.getProjectFiles(selectedProjectId, 'document', { includeBinary: true })
         ])
         
         // Nach Datum sortieren

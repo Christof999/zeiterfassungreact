@@ -117,11 +117,13 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ project, onClos
       
       // Verwende getProjectFiles wie in der alten App (lädt aus Zeiteinträgen)
       const [allPhotos, allDocs, timeEntries, employees, rawVehicleUsages, projectsList] = await Promise.all([
-        DataService.getProjectFiles(project.id!, 'construction_site').catch(err => {
+        DataService.getProjectFiles(project.id!, 'construction_site', {
+          includeBinary: true
+        }).catch(err => {
           console.error('Fehler beim Laden der Fotos:', err)
           return []
         }),
-        DataService.getProjectFiles(project.id!, 'document').catch(err => {
+        DataService.getProjectFiles(project.id!, 'document', { includeBinary: true }).catch(err => {
           console.error('Fehler beim Laden der Dokumente:', err)
           return []
         }),
