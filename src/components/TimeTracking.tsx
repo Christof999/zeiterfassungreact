@@ -24,6 +24,8 @@ const TimeTracking: React.FC = () => {
   const [showManualEntryModal, setShowManualEntryModal] = useState(false)
   const [showRetroDocListModal, setShowRetroDocListModal] = useState(false)
   const [activitiesRefreshKey, setActivitiesRefreshKey] = useState(0)
+  const [clockInProjects, setClockInProjects] = useState<Project[]>([])
+  const [isClockingIn, setIsClockingIn] = useState(false)
   const navigate = useNavigate()
 
   const canManualTimeEntry = canAddManualTimeEntries(currentUser?.username)
@@ -37,26 +39,38 @@ const TimeTracking: React.FC = () => {
       }
 
       setCurrentUser(user)
-      
-      // Prüfe auf aktiven Zeiteintrag
-      const timeEntry = await DataService.getCurrentTimeEntry(user.id)
+
+      const [timeEntry, activeProjects] = await Promise.all([
+        DataService.getCurrentTimeEntry(user.id),
+        DataService.getActiveProjects()
+      ])
+      setClockInProjects(activeProjects)
+
       if (timeEntry) {
-        setCurrentTimeEntry(timeEntry)
-        const project = await DataService.getProjectById(timeEntry.projectId)
-        setCurrentProject(project)
-        
-        // Berechne Einstempelzeit
-        const clockIn = timeEntry.clockInTime instanceof Date
-          ? timeEntry.clockInTime
-          : timeEntry.clockInTime?.toDate?.() || new Date(timeEntry.clockInTime)
-        setClockInTime(clockIn)
+        applyActiveTimeEntry(timeEntry, activeProjects)
       }
-      
+
       setIsLoading(false)
     }
 
     init()
   }, [navigate])
+
+  const applyActiveTimeEntry = (timeEntry: TimeEntry, projectsList: Project[] = clockInProjects) => {
+    setCurrentTimeEntry(timeEntry)
+    const project =
+      projectsList.find((p) => p.id === timeEntry.projectId) ?? null
+    if (project) {
+      setCurrentProject(project)
+    } else {
+      DataService.getProjectById(timeEntry.projectId).then(setCurrentProject)
+    }
+    const clockIn =
+      timeEntry.clockInTime instanceof Date
+        ? timeEntry.clockInTime
+        : timeEntry.clockInTime?.toDate?.() || new Date(timeEntry.clockInTime)
+    setClockInTime(clockIn)
+  }
 
   // Timer für die Zeitanzeige
   useEffect(() => {
@@ -77,26 +91,31 @@ const TimeTracking: React.FC = () => {
   }, [clockInTime])
 
   const handleClockIn = async (projectId: string) => {
+    if (isClockingIn || !currentUser?.id) return
+
+    setIsClockingIn(true)
     try {
       const location = await getCurrentLocation()
       const now = new Date()
 
-      const timeEntry = await DataService.addTimeEntry({
-        employeeId: currentUser!.id,
+      const created = await DataService.addTimeEntry({
+        employeeId: currentUser.id,
         projectId,
         clockInTime: now,
         clockInLocation: location,
         notes: ''
       })
 
-      setCurrentTimeEntry(timeEntry)
-      const project = await DataService.getProjectById(projectId)
-      setCurrentProject(project)
-      setClockInTime(now)
-      
+      const refreshed = await DataService.getCurrentTimeEntry(currentUser.id)
+      applyActiveTimeEntry(refreshed ?? created)
+
+      setActivitiesRefreshKey((k) => k + 1)
       toast.success('Sie wurden erfolgreich eingestempelt!')
-    } catch (error: any) {
-      toast.error('Fehler beim Einstempeln: ' + error.message)
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unbekannter Fehler'
+      toast.error('Fehler beim Einstempeln: ' + msg)
+    } finally {
+      setIsClockingIn(false)
     }
   }
 
@@ -267,7 +286,11 @@ const TimeTracking: React.FC = () => {
           </div>
 
           {!currentTimeEntry ? (
-            <ClockInForm onClockIn={handleClockIn} />
+            <ClockInForm
+              projects={clockInProjects}
+              isSubmitting={isClockingIn}
+              onClockIn={handleClockIn}
+            />
           ) : (
             <ClockOutForm
               timeEntry={currentTimeEntry}

@@ -272,12 +272,7 @@ class DataServiceClass {
     }
     try {
       const projectsRef = collection(db, 'projects')
-      let snapshot
-      try {
-        snapshot = await getDocs(query(projectsRef, where('isActive', '==', true)))
-      } catch {
-        snapshot = await getDocs(projectsRef)
-      }
+      const snapshot = await getDocs(projectsRef)
       let projects = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Project))
 
       projects = projects.filter((project) => {
@@ -335,7 +330,9 @@ class DataServiceClass {
       
       const snapshot = await getDocs(q)
       if (!snapshot.empty) {
-        const activeEntries = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as TimeEntry))
+        const activeEntries = snapshot.docs
+          .map((d) => ({ id: d.id, ...d.data() } as TimeEntry))
+          .filter((e) => e.clockOutTime == null)
         activeEntries.sort((a, b) => {
           const aDate = a.clockInTime instanceof Timestamp
             ? a.clockInTime.toDate()
@@ -350,8 +347,24 @@ class DataServiceClass {
           console.warn(`Mehrere offene Zeiteinträge für Mitarbeiter ${employeeId} gefunden:`, activeEntries.length)
         }
 
-        return sanitizeTimeEntryForRead(activeEntries[0])
+        if (activeEntries.length > 0) {
+          return sanitizeTimeEntryForRead(activeEntries[0])
+        }
       }
+
+      const employeeRef = doc(db, 'employees', employeeId)
+      const employeeSnap = await getDoc(employeeRef)
+      const activeTimeEntryId = employeeSnap.data()?.activeTimeEntryId as string | undefined
+      if (activeTimeEntryId) {
+        const entrySnap = await getDoc(doc(db, 'timeEntries', activeTimeEntryId))
+        if (entrySnap.exists()) {
+          const data = entrySnap.data() as TimeEntry
+          if (data.clockOutTime == null) {
+            return sanitizeTimeEntryForRead({ ...data, id: entrySnap.id } as TimeEntry)
+          }
+        }
+      }
+
       return null
     } catch (error) {
       console.error('Fehler beim Abrufen des aktuellen Zeiteintrags:', error)
