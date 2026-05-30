@@ -25,6 +25,7 @@ import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, L
 import { formatDateForInputLocal } from '../utils/dateUtils'
 import { withTimeout } from '../utils/withTimeout'
 import { sanitizeTimeEntryForRead } from '../utils/sanitizeTimeEntry'
+import { getFileImageSrc } from '../utils/fileImageSrc'
 
 const STORAGE_UPLOAD_TIMEOUT_MS = 25_000
 const IMAGE_PREPARE_TIMEOUT_MS = 90_000
@@ -151,6 +152,12 @@ class DataServiceClass {
       if (match) mimeType = match[1]
     }
 
+    const storagePathRaw = data.storagePath || data.storage_path
+    const storagePath =
+      typeof storagePathRaw === 'string' && storagePathRaw.trim()
+        ? storagePathRaw.trim()
+        : undefined
+
     return {
       id: docId,
       fileName: String(data.fileName || data.name || ''),
@@ -163,7 +170,8 @@ class DataServiceClass {
       notes: String(data.notes || data.comment || ''),
       imageComment: String(data.imageComment || data.comment || ''),
       base64Data: base64,
-      mimeType
+      mimeType,
+      storagePath
     } as FileUpload
   }
 
@@ -2124,6 +2132,38 @@ class DataServiceClass {
       console.error(`Fehler beim Laden von fileUpload ${id}:`, error)
       return null
     }
+  }
+
+
+  /**
+   * Ergänzt Anzeige-URLs für Dateien, die ohne includeBinary geladen wurden
+   * (Firebase-Storage-Pfad, fehlende Download-URL oder Legacy-Base64).
+   */
+  async enrichFilesForDisplay(files: FileUpload[]): Promise<FileUpload[]> {
+    await this.authReadyPromise
+    return Promise.all(
+      files.map(async (file) => {
+        if (getFileImageSrc(file)) return file
+
+        if (file.storagePath) {
+          try {
+            const url = await getDownloadURL(storageRef(storage, file.storagePath))
+            return { ...file, filePath: url }
+          } catch (error) {
+            if (isDevMode) {
+              console.warn('Storage-URL konnte nicht aufgelöst werden:', file.storagePath, error)
+            }
+          }
+        }
+
+        if (file.id) {
+          const full = await this.getFileUploadById(file.id, { includeBinary: true })
+          if (full && getFileImageSrc(full)) return full
+        }
+
+        return file
+      })
+    )
   }
 
   // Projekt-Dateien laden (wie in der alten App - aus Zeiteinträgen und zusätzlich direkt per projectId)
