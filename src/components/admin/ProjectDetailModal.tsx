@@ -3,6 +3,7 @@ import { DataService } from '../../services/dataService'
 import type { Project, FileUpload, TimeEntry, VehicleUsage } from '../../types'
 import { Timestamp } from 'firebase/firestore'
 import { toast } from '../ToastContainer'
+import { getFileImageSrc } from '../../utils/fileImageSrc'
 import '../../styles/Modal.css'
 
 interface ProjectDetailModalProps {
@@ -161,6 +162,12 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ project, onClos
       
       const sortedPhotos = [...allPhotos].sort((a, b) => getTimeValue(b.uploadTime) - getTimeValue(a.uploadTime))
       const sortedDocuments = [...allDocs].sort((a, b) => getTimeValue(b.uploadTime) - getTimeValue(a.uploadTime))
+
+      const [photosWithUrls, documentsWithUrls] = await Promise.all([
+        DataService.enrichFilesForDisplay(sortedPhotos),
+        DataService.enrichFilesForDisplay(sortedDocuments)
+      ])
+
       const sortedTimeEntries = [...timeEntries].sort((a, b) => getTimeValue(b.clockInTime) - getTimeValue(a.clockInTime))
 
       // Mitarbeiternamen zu Zeiteinträgen hinzufügen
@@ -199,8 +206,8 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ project, onClos
           }
         })
       
-      setPhotos(sortedPhotos)
-      setDocuments(sortedDocuments)
+      setPhotos(photosWithUrls)
+      setDocuments(documentsWithUrls)
       setTimeEntries(entriesWithNames)
       setVehicleUsages(usagesWithNames)
     } catch (error) {
@@ -632,32 +639,9 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ project, onClos
                 <p className="no-data">Keine Fotos vorhanden</p>
               ) : (
                 photos.map((photo) => {
-                // Prüfe verschiedene mögliche Formate für base64Data oder filePath/URL
-                const base64Data = photo.base64Data || (photo as any).base64 || (photo as any).base64DataUrl || (photo as any).base64String || ''
-                let mimeType = photo.mimeType || 'image/jpeg'
                 const uploadDay = formatUploadDay(photo.uploadTime)
-                
-                // Falls mimeType ein data URL Präfix ist, extrahiere nur den MIME-Type
-                if (mimeType.startsWith('data:')) {
-                  const match = mimeType.match(/^data:([^;,]+)/)
-                  if (match) {
-                    mimeType = match[1]
-                  }
-                }
-                
-                const fileUrl = photo.filePath || (photo as any).url || ''
-
-                const key = photo.id || `${photo.fileName || fileUrl}-${photo.employeeId || ''}`
-
-                // Verwende entweder base64 oder die URL (Firebase Storage)
-                let imgSrc = ''
-                if (base64Data) {
-                  imgSrc = `data:${mimeType};base64,${base64Data}`
-                } else if (fileUrl) {
-                  // fileUrl könnte bereits eine data URL oder eine Firebase Storage URL sein
-                  imgSrc = fileUrl
-                }
-
+                const imgSrc = getFileImageSrc(photo)
+                const key = photo.id || `${photo.fileName || imgSrc}-${photo.employeeId || ''}`
                 const caption = fileCaption(photo)
 
                 return (
@@ -676,12 +660,7 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ project, onClos
                         }
                         style={{ cursor: 'pointer' }}
                         onError={(e) => {
-                          console.error('Fehler beim Laden des Bildes:', photo.fileName, {
-                            hasBase64: !!base64Data,
-                            base64Length: base64Data ? base64Data.length : 0,
-                            mimeType: mimeType,
-                            photo: photo
-                          })
+                          console.error('Fehler beim Laden des Bildes:', photo.fileName, photo)
                           e.currentTarget.style.display = 'none'
                         }}
                       />
@@ -706,33 +685,16 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ project, onClos
                 <p className="no-data">Keine Dokumente vorhanden</p>
               ) : (
                 documents.map((doc, index) => {
-                  const base64Data = doc.base64Data || (doc as any).base64 || (doc as any).base64String || ''
-                  let mimeType = doc.mimeType || 'image/jpeg'
                   const uploadDay = formatUploadDay(doc.uploadTime)
-                  
-                  // Falls mimeType ein data URL Präfix ist, extrahiere nur den MIME-Type
-                  if (mimeType.startsWith('data:')) {
-                    const match = mimeType.match(/^data:([^;,]+)/)
-                    if (match) {
-                      mimeType = match[1]
-                    }
-                  }
-                  
-                  const fileUrl = doc.filePath || (doc as any).url || ''
-                  const key = doc.id || `doc-${doc.fileName || fileUrl}-${index}`
-                  
-                  // Erstelle die Bild-URL
-                  let imgSrc = ''
-                  if (base64Data) {
-                    imgSrc = `data:${mimeType};base64,${base64Data}`
-                  } else if (fileUrl) {
-                    imgSrc = fileUrl
-                  }
-                  
-                  // Prüfe ob es ein Bild ist
-                  const isImage = mimeType.startsWith('image/') || 
-                    doc.fileName?.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)$/i) ||
-                    fileUrl?.startsWith('data:image/')
+                  const imgSrc = getFileImageSrc(doc)
+                  const key = doc.id || `doc-${doc.fileName || imgSrc}-${index}`
+                  const mimeType = (doc.mimeType || '').toLowerCase()
+
+                  const isImage =
+                    mimeType.startsWith('image/') ||
+                    !!doc.fileName?.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)$/i) ||
+                    imgSrc.startsWith('data:image/') ||
+                    (imgSrc.startsWith('http') && mimeType.startsWith('image/'))
                   
                   const docCaption = fileCaption(doc)
 
