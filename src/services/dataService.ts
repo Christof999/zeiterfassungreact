@@ -29,6 +29,10 @@ import { getFileImageSrc } from '../utils/fileImageSrc'
 
 const STORAGE_UPLOAD_TIMEOUT_MS = 25_000
 const IMAGE_PREPARE_TIMEOUT_MS = 90_000
+// Reines Dekodieren eines Bildes darf nicht endlos hängen (beschädigte/HEIC-Dateien)
+const IMAGE_DECODE_TIMEOUT_MS = 30_000
+// Schreiben der Metadaten in Firestore — verhindert endloses „Speichern…“ bei totem Netz
+const FIRESTORE_WRITE_TIMEOUT_MS = 45_000
 
 const isDevMode = typeof import.meta !== 'undefined' && !!import.meta.env?.DEV
 
@@ -964,10 +968,20 @@ class DataServiceClass {
   }
 
   private async prepareFileForStorageUpload(file: File, type: string): Promise<File> {
+    // Nicht-Bilder (z. B. PDF) niemals durch den Bild-Encoder schicken — das würde hängen.
+    if (!this.isCompressibleImage(file)) return file
     const isDocument = this.isDocumentFileType(type)
     // Auf Mobilgeräten schneller, in Storage trotzdem deutlich schärfer als früher
     const maxWidth = isDocument ? 2400 : 1800
     return this.compressImage(file, isDocument ? 0.9 : 0.85, maxWidth, { forceJpeg: true })
+  }
+
+  /** Lässt sich die Datei sinnvoll per Canvas rastern/komprimieren? */
+  private isCompressibleImage(file: File): boolean {
+    const t = (file.type || '').toLowerCase()
+    if (t.startsWith('image/')) return t !== 'image/svg+xml'
+    // Manche Kamera-/Datei-Apps liefern keinen MIME-Type — dann an der Endung erkennen
+    return /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(file.name || '')
   }
 
   // File Upload — bevorzugt Firebase Storage (volle Qualität), Fallback Base64 in Firestore
@@ -985,7 +999,7 @@ class DataServiceClass {
     try {
       const fileUploadsRef = collection(db, 'fileUploads')
       let uploadDataRaw: Record<string, unknown>
-      let preparedFile: File
+      let preparedFile: File | undefined
 
       try {
         report('Bild wird vorbereitet…')
@@ -1021,8 +1035,11 @@ class DataServiceClass {
       } catch (storageError) {
         console.warn('Storage-Upload fehlgeschlagen, Fallback Firestore Base64:', storageError)
         report('Speichere komprimiert in der Datenbank…')
+        // Das bereits aufbereitete (verkleinerte) Bild als Ausgangspunkt nehmen, falls vorhanden —
+        // so muss das große Original nicht erneut dekodiert werden.
+        const sourceForFallback = preparedFile ?? file
         const { base64: base64String, mimeType } = await withTimeout(
-          this.compressImageForFirestoreUpload(file, type),
+          this.compressImageForFirestoreUpload(sourceForFallback, type),
           IMAGE_PREPARE_TIMEOUT_MS,
           'Die Bildkomprimierung hat zu lange gedauert.'
         )
@@ -1047,22 +1064,26 @@ class DataServiceClass {
       )
 
       report('Metadaten werden gespeichert…')
-      const docRef = await addDoc(fileUploadsRef, uploadData)
-      const uploadDoc = await getDoc(docRef)
-      const saved = uploadDoc.data() || {}
+      // Kein zusätzlicher getDoc-Readback: spart auf der Baustelle eine Netz-Runde und
+      // verhindert ein Hängenbleiben. Die benötigten Werte stehen bereits in uploadDataRaw.
+      const docRef = await withTimeout(
+        addDoc(fileUploadsRef, uploadData),
+        FIRESTORE_WRITE_TIMEOUT_MS,
+        'Speichern hat zu lange gedauert — vermutlich schlechtes Netz. Bitte später erneut versuchen.'
+      )
 
       return {
         id: docRef.id,
         fileName: file.name,
-        filePath: String(saved.filePath || ''),
+        filePath: String(uploadDataRaw.filePath ?? ''),
         fileType: type,
         projectId,
         employeeId,
         timeEntryId: options?.timeEntryId,
-        uploadTime: uploadDoc.data()?.uploadTime || new Date(),
+        uploadTime: new Date(),
         notes,
         imageComment: comment,
-        mimeType: String(saved.mimeType || '')
+        mimeType: String(uploadDataRaw.mimeType ?? '')
       } as FileUpload
     } catch (error) {
       console.error('Fehler beim Hochladen der Datei:', error)
@@ -1074,12 +1095,129 @@ class DataServiceClass {
     return type === 'invoice' || type === 'delivery_note' || type === 'document'
   }
 
-  private async fileToBase64Parts(file: File): Promise<{ base64: string; mimeType: string }> {
-    const dataUrl = await this.fileToBase64(file)
+  /**
+   * Dekodiert eine Bilddatei GENAU EINMAL in eine wiederverwendbare Zeichenquelle.
+   * Bevorzugt createImageBitmap (dekodiert ausserhalb des Main-Threads, deutlich schneller
+   * und schont das Handy), mit robustem Fallback auf ein <img>-Element.
+   */
+  private async decodeImageSource(
+    file: File
+  ): Promise<{ source: CanvasImageSource; width: number; height: number; release: () => void }> {
+    if (typeof createImageBitmap === 'function') {
+      try {
+        // imageOrientation: EXIF-Drehung anwenden (sonst liegen Handy-Fotos quer)
+        const bitmap = await createImageBitmap(file, {
+          imageOrientation: 'from-image'
+        } as ImageBitmapOptions)
+        if (bitmap.width > 0 && bitmap.height > 0) {
+          return {
+            source: bitmap,
+            width: bitmap.width,
+            height: bitmap.height,
+            release: () => bitmap.close()
+          }
+        }
+        bitmap.close()
+      } catch {
+        // Älterer Browser / nicht unterstütztes Format → <img>-Fallback
+      }
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    try {
+      const img = await this.loadImageElement(objectUrl)
+      return {
+        source: img,
+        width: img.naturalWidth || img.width,
+        height: img.naturalHeight || img.height,
+        release: () => URL.revokeObjectURL(objectUrl)
+      }
+    } catch (error) {
+      URL.revokeObjectURL(objectUrl)
+      throw error
+    }
+  }
+
+  private loadImageElement(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const timer = window.setTimeout(() => {
+        img.onload = null
+        img.onerror = null
+        reject(new Error('Bild konnte nicht rechtzeitig gelesen werden.'))
+      }, IMAGE_DECODE_TIMEOUT_MS)
+      img.onload = () => {
+        window.clearTimeout(timer)
+        resolve(img)
+      }
+      img.onerror = () => {
+        window.clearTimeout(timer)
+        reject(new Error('Bild konnte nicht gelesen werden (beschädigt oder nicht unterstützt).'))
+      }
+      img.src = src
+    })
+  }
+
+  /** Zeichnet eine bereits dekodierte Quelle skaliert auf ein Canvas und liefert ein Blob. */
+  private renderToBlob(
+    source: CanvasImageSource,
+    sourceWidth: number,
+    sourceHeight: number,
+    quality: number,
+    maxWidth: number,
+    outputType: string
+  ): Promise<Blob | null> {
+    let width = sourceWidth
+    let height = sourceHeight
+    const maxHeight = Math.round(maxWidth * 1.35)
+    if (width > maxWidth) {
+      height = (height * maxWidth) / width
+      width = maxWidth
+    }
+    if (height > maxHeight) {
+      width = (width * maxHeight) / height
+      height = maxHeight
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(width))
+    canvas.height = Math.max(1, Math.round(height))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return Promise.resolve(null)
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height)
+
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), outputType, quality)
+    })
+  }
+
+  private resolveOutputType(file: File, forceJpeg?: boolean): string {
+    return forceJpeg || !(file.type || '').includes('png') ? 'image/jpeg' : 'image/png'
+  }
+
+  private blobToFile(blob: Blob, originalName: string, outputType: string): File {
+    const ext = outputType === 'image/png' ? '.png' : '.jpg'
+    const baseName = (originalName || 'upload').replace(/\.[^.]+$/, '') || 'upload'
+    return new File([blob], `${baseName}${ext}`, { type: outputType })
+  }
+
+  private async blobToBase64Parts(
+    blob: Blob,
+    fallbackMime: string
+  ): Promise<{ base64: string; mimeType: string }> {
+    const dataUrl = await this.blobToDataUrl(blob)
     const base64 = dataUrl.split(',')[1] || ''
-    const mimeType =
-      dataUrl.split(',')[0]?.split(':')[1]?.split(';')[0] || file.type || 'image/jpeg'
+    const mimeType = dataUrl.split(',')[0]?.split(':')[1]?.split(';')[0] || blob.type || fallbackMime
     return { base64, mimeType }
+  }
+
+  private blobToDataUrl(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (e) => resolve(e.target?.result as string)
+      reader.onerror = () => reject(new Error('Bilddaten konnten nicht gelesen werden.'))
+      reader.readAsDataURL(blob)
+    })
   }
 
   /**
@@ -1095,30 +1233,54 @@ class DataServiceClass {
     let maxWidth = isDocument ? 1800 : 1400
     const minQuality = 0.42
     const minWidth = 640
+    // base64 ist ~4/3 der Rohbytes — daraus die zulässige Blob-Grösse ableiten, statt
+    // bei jedem Versuch teuer base64 zu kodieren (nur das Gewinner-Blob wird kodiert).
+    const maxBlobBytes = Math.floor((FIRESTORE_MAX_BASE64_BYTES * 3) / 4)
+    const outputType = 'image/jpeg'
 
-    for (let attempt = 0; attempt < 12; attempt++) {
-      const compressed = await this.compressImage(file, quality, maxWidth, {
-        forceJpeg: true
-      })
-      const { base64, mimeType } = await this.fileToBase64Parts(compressed)
-
-      if (base64.length <= FIRESTORE_MAX_BASE64_BYTES) {
-        if (isDevMode && attempt > 0) {
-          console.log(
-            `Bild komprimiert (${attempt + 1}. Versuch): ${Math.round(base64.length / 1024)} KB`
-          )
+    // Bild nur EINMAL dekodieren und für alle Versuche wiederverwenden — das war bisher
+    // der Flaschenhals (bis zu 12 Dekodierungen des Originals auf dem Handy → Timeout).
+    const decoded = await this.decodeImageSource(file)
+    try {
+      let smallestBlob: Blob | null = null
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const blob = await this.renderToBlob(
+          decoded.source,
+          decoded.width,
+          decoded.height,
+          quality,
+          maxWidth,
+          outputType
+        )
+        if (blob) {
+          if (!smallestBlob || blob.size < smallestBlob.size) smallestBlob = blob
+          if (blob.size <= maxBlobBytes) {
+            if (isDevMode && attempt > 0) {
+              console.log(
+                `Bild komprimiert (${attempt + 1}. Versuch): ${Math.round(blob.size / 1024)} KB`
+              )
+            }
+            return this.blobToBase64Parts(blob, outputType)
+          }
         }
-        return { base64, mimeType }
+
+        if (quality > minQuality + 0.08) {
+          quality -= 0.1
+        } else if (maxWidth > minWidth) {
+          maxWidth = Math.max(minWidth, Math.round(maxWidth * 0.72))
+          quality = isDocument ? 0.78 : 0.7
+        } else {
+          break
+        }
       }
 
-      if (quality > minQuality + 0.08) {
-        quality -= 0.1
-      } else if (maxWidth > minWidth) {
-        maxWidth = Math.max(minWidth, Math.round(maxWidth * 0.72))
-        quality = isDocument ? 0.78 : 0.7
-      } else {
-        break
+      // Selbst die kleinste Variante nehmen, sofern sie noch unter dem harten Firestore-Limit liegt.
+      if (smallestBlob) {
+        const parts = await this.blobToBase64Parts(smallestBlob, outputType)
+        if (parts.base64.length <= FIRESTORE_MAX_BASE64_BYTES) return parts
       }
+    } finally {
+      decoded.release()
     }
 
     throw new Error(
@@ -1132,59 +1294,22 @@ class DataServiceClass {
     maxWidth: number,
     options?: { forceJpeg?: boolean }
   ): Promise<File> {
-    return new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const img = new Image()
-        img.onload = () => {
-          const canvas = document.createElement('canvas')
-          let width = img.width
-          let height = img.height
-
-          const maxHeight = Math.round(maxWidth * 1.35)
-          if (width > maxWidth) {
-            height = (height * maxWidth) / width
-            width = maxWidth
-          }
-          if (height > maxHeight) {
-            width = (width * maxHeight) / height
-            height = maxHeight
-          }
-
-          canvas.width = Math.round(width)
-          canvas.height = Math.round(height)
-          const ctx = canvas.getContext('2d')!
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-
-          const outputType =
-            options?.forceJpeg || !file.type.includes('png') ? 'image/jpeg' : 'image/png'
-          canvas.toBlob(
-            (blob) => {
-              if (blob) {
-                const ext = outputType === 'image/png' ? '.png' : '.jpg'
-                const baseName = file.name.replace(/\.[^.]+$/, '') || 'upload'
-                resolve(new File([blob], `${baseName}${ext}`, { type: outputType }))
-              } else {
-                resolve(file)
-              }
-            },
-            outputType,
-            quality
-          )
-        }
-        img.src = e.target?.result as string
-      }
-      reader.readAsDataURL(file)
-    })
-  }
-
-  private fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = (e) => resolve(e.target?.result as string)
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })
+    const decoded = await this.decodeImageSource(file)
+    try {
+      const outputType = this.resolveOutputType(file, options?.forceJpeg)
+      const blob = await this.renderToBlob(
+        decoded.source,
+        decoded.width,
+        decoded.height,
+        quality,
+        maxWidth,
+        outputType
+      )
+      // Falls toBlob fehlschlägt: lieber das Original hochladen als gar nichts.
+      return blob ? this.blobToFile(blob, file.name, outputType) : file
+    } finally {
+      decoded.release()
+    }
   }
 
   // Live Documentation
