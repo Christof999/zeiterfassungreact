@@ -26,6 +26,7 @@ import { formatDateForInputLocal } from '../utils/dateUtils'
 import { withTimeout } from '../utils/withTimeout'
 import { sanitizeTimeEntryForRead } from '../utils/sanitizeTimeEntry'
 import { getFileImageSrc } from '../utils/fileImageSrc'
+import { toFileUploadRef } from '../utils/fileUploadRef'
 
 const STORAGE_UPLOAD_TIMEOUT_MS = 25_000
 const IMAGE_PREPARE_TIMEOUT_MS = 90_000
@@ -738,6 +739,55 @@ class DataServiceClass {
       console.error('Fehler beim Aktualisieren des Zeiteintrags:', error)
       throw error
     }
+  }
+
+  /**
+   * Verknüpft bereits hochgeladene Fotos/Dokumente mit einem Zeiteintrag und MERGT sie in die
+   * bestehenden Listen ein (liest den Eintrag frisch). Idempotent gegenüber bereits vorhandenen
+   * Feldern — wird sowohl online als auch vom Offline-Upload-Queue (späteres Nachreichen) genutzt.
+   */
+  async attachDocumentationUploads(
+    timeEntryId: string,
+    data: { sitePhotos?: FileUpload[]; documents?: FileUpload[]; notes?: string }
+  ): Promise<void> {
+    await this.authReadyPromise
+    const entry = await this.getTimeEntryById(timeEntryId)
+    if (!entry) throw new Error('Zeiteintrag nicht gefunden')
+
+    const sitePhotos = data.sitePhotos || []
+    const documents = data.documents || []
+
+    const mergeIds = (existing: unknown, additions: FileUpload[]): string[] => {
+      const prev = Array.isArray(existing) ? (existing as unknown[]).map(String).filter(Boolean) : []
+      return [...prev, ...additions.map((u) => u.id)]
+    }
+    const mergeRefs = (existing: unknown, additions: FileUpload[]): unknown[] => {
+      const base = Array.isArray(existing) ? [...existing] : []
+      return [...base, ...additions.map(toFileUploadRef)]
+    }
+
+    const mergedSiteUploads = mergeIds(entry.sitePhotoUploads, sitePhotos)
+    const mergedDocUploads = mergeIds(entry.documentPhotoUploads, documents)
+    const notes = typeof data.notes === 'string' ? data.notes.trim() : undefined
+
+    const update: Partial<TimeEntry> = {
+      sitePhotoUploads: mergedSiteUploads,
+      documentPhotoUploads: mergedDocUploads,
+      sitePhotos: mergeRefs(entry.sitePhotos, sitePhotos) as TimeEntry['sitePhotos'],
+      documents: mergeRefs(entry.documents, documents) as TimeEntry['documents'],
+      hasDocumentation:
+        !!entry.hasDocumentation ||
+        mergedSiteUploads.length > 0 ||
+        mergedDocUploads.length > 0 ||
+        (entry.notes || '').trim() !== '' ||
+        !!notes
+    }
+    // Notizen nur setzen, wenn übergeben und noch nicht identisch gespeichert (kein Überschreiben mit leer)
+    if (notes && notes !== (entry.notes || '').trim()) {
+      update.notes = notes
+    }
+
+    await this.updateTimeEntry(timeEntryId, update)
   }
 
   /**

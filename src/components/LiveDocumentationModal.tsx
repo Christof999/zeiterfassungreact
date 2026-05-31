@@ -3,7 +3,8 @@ import { DataService } from '../services/dataService'
 import type { TimeEntry } from '../types'
 import PhotoUpload, { type PhotoUploadItem } from './PhotoUpload'
 import SaveProgressOverlay from './SaveProgressOverlay'
-import { uploadPhotoItemsForTimeEntry } from '../utils/uploadEntryPhotos'
+import { uploadDocumentationWithOfflineFallback } from '../utils/saveDocumentationPhotos'
+import { withTimeout } from '../utils/withTimeout'
 import { toast } from './ToastContainer'
 import '../styles/Modal.css'
 
@@ -47,47 +48,65 @@ const LiveDocumentationModal: React.FC<LiveDocumentationModalProps> = ({
         throw new Error('Benutzer nicht angemeldet')
       }
 
-      let step = 0
-
-      const { uploads: sitePhotoObjects, stepsDone: afterSite } =
-        await uploadPhotoItemsForTimeEntry({
-          items: sitePhotoItems,
+      const { siteUploads, documentUploads, deferredPhotos } =
+        await uploadDocumentationWithOfflineFallback({
+          batches: [
+            {
+              items: sitePhotoItems,
+              resolveFileType: () => 'construction_site',
+              category: 'site',
+              label: 'Baustellenfoto'
+            },
+            {
+              items: documentPhotoItems,
+              resolveFileType: (file) =>
+                file.name.toLowerCase().includes('rechnung') ? 'invoice' : 'delivery_note',
+              category: 'document',
+              label: 'Dokument'
+            }
+          ],
           projectId: timeEntry.projectId,
           employeeId: timeEntry.employeeId,
           timeEntryId: timeEntry.id,
-          resolveFileType: () => 'construction_site',
-          label: 'Baustellenfoto',
-          initialStep: step,
-          onProgress: ({ message, step: s }) => reportProgress(message, s)
+          notes,
+          initialStep: 0,
+          onProgress: ({ message, step }) => reportProgress(message, step)
         })
-      step = afterSite
 
-      const { uploads: documentPhotoObjects } = await uploadPhotoItemsForTimeEntry({
-        items: documentPhotoItems,
-        projectId: timeEntry.projectId,
-        employeeId: timeEntry.employeeId,
-        timeEntryId: timeEntry.id,
-        resolveFileType: (file) =>
-          file.name.toLowerCase().includes('rechnung') ? 'invoice' : 'delivery_note',
-        label: 'Dokument',
-        initialStep: step,
-        onProgress: ({ message, step: s }) => reportProgress(message, s)
-      })
-
-      reportProgress('Eintrag wird in der Zeiterfassung gespeichert…', totalSteps - 1)
-
-      await DataService.addLiveDocumentationToTimeEntry(timeEntry.id, {
-        notes,
-        images: sitePhotoObjects,
-        documents: documentPhotoObjects,
-        photoCount: sitePhotoObjects.length,
-        documentCount: documentPhotoObjects.length,
-        addedBy: currentUser.id,
-        addedByName: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim()
-      })
+      // Online-Verknüpfung nur, wenn es online Hochgeladenes/Notizen gibt — sonst übernimmt
+      // der Hintergrund-Upload alles (verhindert Hängen bei komplett fehlendem Netz).
+      const hasOnlineUploads = siteUploads.length > 0 || documentUploads.length > 0
+      if (hasOnlineUploads || deferredPhotos === 0) {
+        reportProgress('Eintrag wird in der Zeiterfassung gespeichert…', totalSteps - 1)
+        try {
+          await withTimeout(
+            DataService.addLiveDocumentationToTimeEntry(timeEntry.id, {
+              notes,
+              images: siteUploads,
+              documents: documentUploads,
+              photoCount: siteUploads.length,
+              documentCount: documentUploads.length,
+              addedBy: currentUser.id,
+              addedByName: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim()
+            }),
+            30_000,
+            'Speichern hat zu lange gedauert — vermutlich schlechtes Netz.'
+          )
+        } catch (linkErr) {
+          // Offline: Notizen/Fotos werden vom Hintergrund-Upload nachgereicht
+          if (deferredPhotos === 0) throw linkErr
+          console.warn('Live-Doku-Verknüpfung verschoben (offline):', linkErr)
+        }
+      }
 
       setProgressStep(totalSteps)
-      toast.success('Live-Dokumentation erfolgreich gespeichert!')
+      if (deferredPhotos > 0) {
+        toast.success(
+          `Gespeichert. ${deferredPhotos} Foto(s) werden automatisch hochgeladen, sobald wieder Netz da ist.`
+        )
+      } else {
+        toast.success('Live-Dokumentation erfolgreich gespeichert!')
+      }
       onClose()
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Unbekannter Fehler'

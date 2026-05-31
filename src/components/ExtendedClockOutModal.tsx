@@ -4,7 +4,8 @@ import type { TimeEntry, Vehicle } from '../types'
 import PhotoUpload, { type PhotoUploadItem } from './PhotoUpload'
 import { VehicleBookingFormFields } from './VehicleBookingFormFields'
 import { toast } from './ToastContainer'
-import { toFileUploadRef } from '../utils/fileUploadRef'
+import { uploadDocumentationWithOfflineFallback } from '../utils/saveDocumentationPhotos'
+import { withTimeout } from '../utils/withTimeout'
 import { getTodayLocalDateString } from '../utils/dateUtils'
 import '../styles/Modal.css'
 
@@ -124,55 +125,57 @@ const ExtendedClockOutModal: React.FC<ExtendedClockOutModalProps> = ({
 
       const location = await getCurrentLocation()
 
-      // Upload site photos (Kommentar pro Bild → imageComment in Firestore)
-      const sitePhotoObjects = []
-      for (const { file, comment } of sitePhotoItems) {
-        const upload = await DataService.uploadFile(
-          file,
-          timeEntry.projectId,
-          timeEntry.employeeId,
-          'construction_site',
-          '',
-          comment.trim(),
-          { timeEntryId: timeEntry.id }
-        )
-        sitePhotoObjects.push(upload)
-      }
-
-      // Upload document photos
-      const documentPhotoObjects = []
-      for (const { file, comment } of documentPhotoItems) {
-        const documentType = file.name.toLowerCase().includes('rechnung') 
-          ? 'invoice' 
-          : 'delivery_note'
-        const upload = await DataService.uploadFile(
-          file,
-          timeEntry.projectId,
-          timeEntry.employeeId,
-          documentType,
-          '',
-          comment.trim(),
-          { timeEntryId: timeEntry.id }
-        )
-        documentPhotoObjects.push(upload)
-      }
-
-      // Clock out
+      // Zuerst ausstempeln — Fotos dürfen das Arbeitsende NICHT mehr blockieren (schlechtes Netz).
       await DataService.clockOutEmployee(timeEntry.id, notes, location, pauseTotalTimeMs)
 
-      // Update with documentation
-      await DataService.updateTimeEntry(timeEntry.id, {
-        sitePhotoUploads: sitePhotoObjects.map(u => u.id),
-        documentPhotoUploads: documentPhotoObjects.map(u => u.id),
-        sitePhotos: sitePhotoObjects.map(toFileUploadRef),
-        documents: documentPhotoObjects.map(toFileUploadRef),
-        hasDocumentation:
-          sitePhotoObjects.length > 0 ||
-          documentPhotoObjects.length > 0 ||
-          notes.trim() !== ''
-      })
+      // Fotos hochladen — bei Netzproblemen wandern sie in die Offline-Queue (Upload später).
+      const { siteUploads, documentUploads, deferredPhotos } =
+        await uploadDocumentationWithOfflineFallback({
+          batches: [
+            {
+              items: sitePhotoItems,
+              resolveFileType: () => 'construction_site',
+              category: 'site',
+              label: 'Baustellenfoto'
+            },
+            {
+              items: documentPhotoItems,
+              resolveFileType: (file) =>
+                file.name.toLowerCase().includes('rechnung') ? 'invoice' : 'delivery_note',
+              category: 'document',
+              label: 'Dokument'
+            }
+          ],
+          projectId: timeEntry.projectId,
+          employeeId: timeEntry.employeeId,
+          timeEntryId: timeEntry.id,
+          notes: notes.trim()
+        })
 
-      toast.success('Erfolgreich ausgestempelt mit Dokumentation!')
+      // Online hochgeladene Fotos sofort verknüpfen (per Merge, falls die Queue parallel nachreicht)
+      if (siteUploads.length > 0 || documentUploads.length > 0) {
+        try {
+          await withTimeout(
+            DataService.attachDocumentationUploads(timeEntry.id, {
+              sitePhotos: siteUploads,
+              documents: documentUploads
+            }),
+            30_000,
+            'Speichern hat zu lange gedauert — vermutlich schlechtes Netz.'
+          )
+        } catch (linkErr) {
+          if (deferredPhotos === 0) throw linkErr
+          console.warn('Doku-Verknüpfung verschoben (offline):', linkErr)
+        }
+      }
+
+      if (deferredPhotos > 0) {
+        toast.success(
+          `Ausgestempelt. ${deferredPhotos} Foto(s) werden automatisch hochgeladen, sobald wieder Netz da ist.`
+        )
+      } else {
+        toast.success('Erfolgreich ausgestempelt mit Dokumentation!')
+      }
 
       onClockOutSuccess()
       onClose()

@@ -4,7 +4,8 @@ import type { TimeEntry, Vehicle, FileUpload } from '../types'
 import PhotoUpload, { type PhotoUploadItem } from './PhotoUpload'
 import SaveProgressOverlay from './SaveProgressOverlay'
 import { VehicleBookingFormFields } from './VehicleBookingFormFields'
-import { uploadPhotoItemsForTimeEntry } from '../utils/uploadEntryPhotos'
+import { uploadDocumentationWithOfflineFallback } from '../utils/saveDocumentationPhotos'
+import { withTimeout } from '../utils/withTimeout'
 import { toFileUploadRef } from '../utils/fileUploadRef'
 import { toast } from './ToastContainer'
 import { formatDateForInputLocal } from '../utils/dateUtils'
@@ -159,61 +160,76 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
         }
       }
 
-      const { uploads: sitePhotoObjects, stepsDone: afterSite } =
-        await uploadPhotoItemsForTimeEntry({
-          items: sitePhotoItems,
+      const { siteUploads, documentUploads, deferredPhotos } =
+        await uploadDocumentationWithOfflineFallback({
+          batches: [
+            {
+              items: sitePhotoItems,
+              resolveFileType: () => 'construction_site',
+              category: 'site',
+              label: 'Baustellenfoto'
+            },
+            {
+              items: documentPhotoItems,
+              resolveFileType: (file) =>
+                file.name.toLowerCase().includes('rechnung') ? 'invoice' : 'delivery_note',
+              category: 'document',
+              label: 'Dokument'
+            }
+          ],
           projectId: timeEntry.projectId,
           employeeId: timeEntry.employeeId,
           timeEntryId: timeEntry.id,
-          resolveFileType: () => 'construction_site',
-          label: 'Baustellenfoto',
+          notes: notes.trim(),
           initialStep: step,
           onProgress: ({ message, step: s }) => {
             setProgressMessage(message)
             setProgressStep(s)
           }
         })
-      step = afterSite
 
-      const { uploads: documentPhotoObjects } = await uploadPhotoItemsForTimeEntry({
-        items: documentPhotoItems,
-        projectId: timeEntry.projectId,
-        employeeId: timeEntry.employeeId,
-        timeEntryId: timeEntry.id,
-        resolveFileType: (file) =>
-          file.name.toLowerCase().includes('rechnung') ? 'invoice' : 'delivery_note',
-        label: 'Dokument',
-        initialStep: step,
-        onProgress: ({ message, step: s }) => {
-          setProgressMessage(message)
-          setProgressStep(s)
+      const mergedSiteUploads = mergeIdList(timeEntry.sitePhotoUploads, siteUploads.map((u) => u.id))
+      const mergedDocUploads = mergeIdList(timeEntry.documentPhotoUploads, documentUploads.map((u) => u.id))
+      const mergedSitePhotos = mergeFileList(timeEntry.sitePhotos, siteUploads)
+      const mergedDocuments = mergeFileList(timeEntry.documents, documentUploads)
+
+      // Online-Verknüpfung nur, wenn etwas online gespeichert werden muss — sonst übernimmt der
+      // Hintergrund-Upload Notizen + Fotos (verhindert Hängen bei komplett fehlendem Netz).
+      const hasOnlineUploads = siteUploads.length > 0 || documentUploads.length > 0
+      if (hasOnlineUploads || deferredPhotos === 0) {
+        setProgressMessage('Zeiteintrag wird aktualisiert…')
+        try {
+          await withTimeout(
+            DataService.updateTimeEntry(timeEntry.id, {
+              notes: notes.trim(),
+              sitePhotoUploads: mergedSiteUploads,
+              documentPhotoUploads: mergedDocUploads,
+              sitePhotos: mergedSitePhotos as TimeEntry['sitePhotos'],
+              documents: mergedDocuments as TimeEntry['documents'],
+              hasDocumentation:
+                !!timeEntry.hasDocumentation ||
+                mergedSiteUploads.length > 0 ||
+                mergedDocUploads.length > 0 ||
+                notes.trim() !== ''
+            }),
+            30_000,
+            'Speichern hat zu lange gedauert — vermutlich schlechtes Netz.'
+          )
+        } catch (linkErr) {
+          // Offline: Notizen/Fotos werden vom Hintergrund-Upload nachgereicht
+          if (deferredPhotos === 0) throw linkErr
+          console.warn('Doku-Verknüpfung verschoben (offline):', linkErr)
         }
-      })
-
-      const newSiteIds = sitePhotoObjects.map((u) => u.id)
-      const newDocIds = documentPhotoObjects.map((u) => u.id)
-
-      const mergedSiteUploads = mergeIdList(timeEntry.sitePhotoUploads, newSiteIds)
-      const mergedDocUploads = mergeIdList(timeEntry.documentPhotoUploads, newDocIds)
-      const mergedSitePhotos = mergeFileList(timeEntry.sitePhotos, sitePhotoObjects)
-      const mergedDocuments = mergeFileList(timeEntry.documents, documentPhotoObjects)
-
-      setProgressMessage('Zeiteintrag wird aktualisiert…')
-      await DataService.updateTimeEntry(timeEntry.id, {
-        notes: notes.trim(),
-        sitePhotoUploads: mergedSiteUploads,
-        documentPhotoUploads: mergedDocUploads,
-        sitePhotos: mergedSitePhotos as TimeEntry['sitePhotos'],
-        documents: mergedDocuments as TimeEntry['documents'],
-        hasDocumentation:
-          !!timeEntry.hasDocumentation ||
-          mergedSiteUploads.length > 0 ||
-          mergedDocUploads.length > 0 ||
-          notes.trim() !== ''
-      })
+      }
 
       setProgressStep(totalSteps)
-      toast.success('Dokumentation wurde gespeichert.')
+      if (deferredPhotos > 0) {
+        toast.success(
+          `Gespeichert. ${deferredPhotos} Foto(s) werden automatisch hochgeladen, sobald wieder Netz da ist.`
+        )
+      } else {
+        toast.success('Dokumentation wurde gespeichert.')
+      }
       onSaved()
       onClose()
     } catch (error: unknown) {
