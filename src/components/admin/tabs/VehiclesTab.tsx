@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { DataService } from '../../../services/dataService'
 import type { Vehicle } from '../../../types'
 import { toast } from '../../ToastContainer'
 import VehicleModal from '../VehicleModal'
+import ListSearch from '../ListSearch'
 import '../../../styles/AdminTabs.css'
 
 const VehiclesTab: React.FC = () => {
@@ -11,6 +12,17 @@ const VehiclesTab: React.FC = () => {
   const [deletingVehicleId, setDeletingVehicleId] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const filteredVehicles = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
+    if (!term) return vehicles
+    return vehicles.filter((vehicle) =>
+      [vehicle.name, vehicle.licensePlate]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(term))
+    )
+  }, [vehicles, searchTerm])
 
   useEffect(() => {
     loadVehicles()
@@ -79,6 +91,15 @@ const VehiclesTab: React.FC = () => {
       {vehicles.length === 0 ? (
         <p className="no-data">Keine Fahrzeuge vorhanden</p>
       ) : (
+        <>
+          <ListSearch
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Fahrzeug suchen (Name, Kennzeichen)"
+          />
+          {filteredVehicles.length === 0 ? (
+            <p className="no-data">Keine Treffer für „{searchTerm}"</p>
+          ) : (
         <div className="data-table-container">
           <table className="data-table">
             <thead>
@@ -91,7 +112,7 @@ const VehiclesTab: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {vehicles.map((vehicle) => (
+              {filteredVehicles.map((vehicle) => (
                 <tr key={vehicle.id}>
                   <td data-label="Name">{vehicle.name}</td>
                   <td data-label="Kennzeichen">{vehicle.licensePlate || '-'}</td>
@@ -124,6 +145,8 @@ const VehiclesTab: React.FC = () => {
             </tbody>
           </table>
         </div>
+          )}
+        </>
       )}
 
       {showModal && (
