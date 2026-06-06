@@ -69,6 +69,15 @@ function durationHours(entry: TimeEntry): number | null {
   return Math.max(0, (grossMs - pauseMs) / 3_600_000)
 }
 
+/** Gearbeitete Stunden – für laufende Einträge (kein clockOut) bis jetzt gerechnet. */
+function workedHoursSoFar(entry: TimeEntry): number {
+  const start = toJsDate(entry.clockInTime)
+  if (!start) return 0
+  const end = toJsDate(entry.clockOutTime) || new Date()
+  const pauseMs = typeof entry.pauseTotalTime === 'number' ? entry.pauseTotalTime : 0
+  return Math.max(0, (end.getTime() - start.getTime() - pauseMs) / 3_600_000)
+}
+
 function pauseMinutes(entry: TimeEntry): number {
   return Math.round((entry.pauseTotalTime || 0) / 60000)
 }
@@ -150,6 +159,18 @@ const toolDeclarations = [
       },
       required: ['mitarbeiterId']
     }
+  },
+  {
+    name: 'werArbeitetHeute',
+    description:
+      'Gibt zurück, welche Mitarbeiter heute gearbeitet haben und wie lange (Stunden je Mitarbeiter, laufende Einträge bis jetzt gerechnet).',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'werIstEingestempelt',
+    description:
+      'Gibt zurück, wer aktuell eingestempelt ist (offene Zeiteinträge), inkl. Projekt, seit wann und bisheriger Dauer.',
+    parameters: { type: 'object', properties: {} }
   },
 
   // --- Zeiteinträge ändern ---
@@ -713,6 +734,57 @@ async function executeTool(
       }
     }
 
+    case 'werArbeitetHeute': {
+      const entries = await DataService.getTodaysTimeEntries()
+      const employees = await DataService.getAllEmployees()
+      const nameOf = (id: string) => {
+        const e = employees.find((x) => x.id === id)
+        return e ? getEmployeeDisplayName(e) : id
+      }
+      const byEmployee = new Map<string, { stunden: number; eintraege: number; aktiv: boolean }>()
+      for (const e of entries) {
+        const acc = byEmployee.get(e.employeeId) || { stunden: 0, eintraege: 0, aktiv: false }
+        acc.stunden += workedHoursSoFar(e)
+        acc.eintraege += 1
+        if (e.clockOutTime == null) acc.aktiv = true
+        byEmployee.set(e.employeeId, acc)
+      }
+      const mitarbeiter = [...byEmployee.entries()]
+        .map(([id, v]) => ({
+          mitarbeiterId: id,
+          name: nameOf(id),
+          stunden: Math.round(v.stunden * 100) / 100,
+          eintraege: v.eintraege,
+          nochEingestempelt: v.aktiv
+        }))
+        .sort((a, b) => b.stunden - a.stunden)
+      return {
+        datum: new Date().toLocaleDateString('de-DE'),
+        mitarbeiter,
+        gesamtStunden: Math.round(mitarbeiter.reduce((s, m) => s + m.stunden, 0) * 100) / 100
+      }
+    }
+    case 'werIstEingestempelt': {
+      const entries = await DataService.getCurrentTimeEntries()
+      const employees = await DataService.getAllEmployees()
+      const projects = await DataService.getAllProjects()
+      const empName = (id: string) => {
+        const e = employees.find((x) => x.id === id)
+        return e ? getEmployeeDisplayName(e) : id
+      }
+      const projName = (id: string) => projects.find((p) => p.id === id)?.name || id
+      return {
+        eingestempelt: entries.map((e) => ({
+          mitarbeiterId: e.employeeId,
+          name: empName(e.employeeId),
+          projekt: projName(e.projectId),
+          seit: fmtDateTime(e.clockInTime),
+          dauerStunden: Math.round(workedHoursSoFar(e) * 100) / 100
+        })),
+        anzahl: entries.length
+      }
+    }
+
     // --- Zeiteinträge ändern ---
     case 'aendereZeiten': {
       const update: Partial<TimeEntry> = {}
@@ -1000,7 +1072,7 @@ function buildSystemInstruction(admin: AdminInfo): string {
   })
   return [
     'Du bist „Mörgel", der freundliche KI-Assistent im Admin-Panel der Lauffer Zeiterfassung (Gartenbau · Erdbau · Natursteinhandel).',
-    `Du hilfst dem Administrator${admin.name ? ` (${admin.name})` : ''}, die App umfassend zu steuern: Zeiteinträge ändern/anlegen/umbuchen/löschen, Pausen setzen, Maschinenbuchungen nachtragen/löschen, Projekte/Maschinen/Mitarbeiter anlegen, bearbeiten und archivieren/deaktivieren, Urlaubsanträge anzeigen/genehmigen/ablehnen sowie Stunden-Auswertungen für Mitarbeiter und Projekte erstellen.`,
+    `Du hilfst dem Administrator${admin.name ? ` (${admin.name})` : ''}, die App umfassend zu steuern: Zeiteinträge ändern/anlegen/umbuchen/löschen, Pausen setzen, Maschinenbuchungen nachtragen/löschen, Projekte/Maschinen/Mitarbeiter anlegen, bearbeiten und archivieren/deaktivieren, Urlaubsanträge anzeigen/genehmigen/ablehnen, Stunden-Auswertungen für Mitarbeiter und Projekte erstellen sowie anzeigen, wer heute wie lange gearbeitet hat und wer aktuell eingestempelt ist.`,
     `Heutiges Datum: ${heute}. Rechne relative Angaben wie „gestern" oder „letzten Montag" in konkrete Daten um.`,
     'Antworte immer auf Deutsch, kurz und klar.',
     'Ermittle IDs IMMER zuerst über die Lese-Funktionen (listeMitarbeiter, listeProjekte, listeMaschinen, findeZeiteintraege, findeMaschinenbuchungen). Erfinde niemals IDs.',
