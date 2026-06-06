@@ -10,6 +10,7 @@ import ProjectsTab from './tabs/ProjectsTab'
 import VehiclesTab from './tabs/VehiclesTab'
 import ReportsTab from './tabs/ReportsTab'
 import VacationTab from './tabs/VacationTab'
+import MoergelChat from './MoergelChat'
 import '../../styles/AdminDashboard.css'
 
 type TabType =
@@ -330,6 +331,10 @@ const AdminDashboard: React.FC = () => {
           {currentTab === 'reports' && <ReportsTab defaultReportType="employee" allowedReportTypes={['employee']} />}
         </div>
       </main>
+
+      {currentAdmin?.isAdmin && (
+        <MoergelChat admin={{ id: currentAdmin.id, name: currentAdmin.name }} />
+      )}
     </div>
   )
 }
