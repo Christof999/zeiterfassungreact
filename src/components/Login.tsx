@@ -54,7 +54,7 @@ const Login: React.FC = () => {
         <ThemeToggle variant="icon" className="login-theme-toggle" />
         <div className="login-logo">
           <img 
-            src="https://anfragenmanager.s3.eu-central-1.amazonaws.com/Logo_Lauffer_RGB.png" 
+            src="/logo.png" 
             alt="Lauffer Logo" 
             className="login-logo-image"
           />

@@ -55,7 +55,7 @@ const AdminLogin: React.FC = () => {
         <ThemeToggle variant="icon" className="admin-login-theme-toggle" />
         <div className="admin-login-logo">
           <img 
-            src="https://anfragenmanager.s3.eu-central-1.amazonaws.com/Logo_Lauffer_RGB.png" 
+            src="/logo.png" 
             alt="Lauffer Logo" 
             className="admin-login-logo-image"
           />

@@ -5,7 +5,7 @@ const SplashScreen: React.FC = () => {
     <div className="splash-screen">
       <div className="splash-content">
         <img 
-          src="https://anfragenmanager.s3.eu-central-1.amazonaws.com/Logo_Lauffer_RGB.png" 
+          src="/logo.png" 
           alt="Lauffer Logo" 
           className="splash-logo"
         />
