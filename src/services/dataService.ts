@@ -1557,10 +1557,23 @@ class DataServiceClass {
 
       const docRef = await addDoc(vehicleUsagesRef, payload)
       const usageDoc = await getDoc(docRef)
-      
+
       return { id: docRef.id, ...usageDoc.data() } as VehicleUsage
     } catch (error) {
       console.error('Fehler beim Erstellen der Fahrzeugnutzung:', error)
+      throw error
+    }
+  }
+
+  async deleteVehicleUsage(id: string): Promise<void> {
+    await this.authReadyPromise
+    try {
+      if (!id) {
+        throw new Error('Keine gültige Maschinenbuchungs-ID angegeben')
+      }
+      await deleteDoc(doc(db, 'vehicleUsages', id))
+    } catch (error) {
+      console.error('Fehler beim Löschen der Fahrzeugnutzung:', error)
       throw error
     }
   }

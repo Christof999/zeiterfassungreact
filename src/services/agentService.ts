@@ -292,6 +292,158 @@ const toolDeclarations = [
       },
       required: ['vorname', 'nachname', 'benutzername', 'passwort']
     }
+  },
+
+  // --- Bearbeiten ---
+  {
+    name: 'aendereProjekt',
+    description:
+      'Ändert Felder eines bestehenden Projekts. Nur angegebene Felder werden geändert. Schreibend – Bestätigung nötig.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projektId: { type: 'string' },
+        name: { type: 'string' },
+        kunde: { type: 'string' },
+        adresse: { type: 'string' },
+        beschreibung: { type: 'string' },
+        status: { type: 'string', description: 'active | planned | completed | archived' },
+        startDatum: { type: 'string', description: 'YYYY-MM-DD' },
+        endDatum: { type: 'string', description: 'YYYY-MM-DD' }
+      },
+      required: ['projektId']
+    }
+  },
+  {
+    name: 'aendereMaschine',
+    description: 'Ändert Felder einer Maschine. Nur angegebene Felder werden geändert. Schreibend – Bestätigung nötig.',
+    parameters: {
+      type: 'object',
+      properties: {
+        maschineId: { type: 'string' },
+        name: { type: 'string' },
+        typ: { type: 'string' },
+        kennzeichen: { type: 'string' },
+        stundensatz: { type: 'number' },
+        aktiv: { type: 'boolean' }
+      },
+      required: ['maschineId']
+    }
+  },
+  {
+    name: 'aendereMitarbeiter',
+    description:
+      'Ändert Felder eines Mitarbeiters. Nur angegebene Felder werden geändert. Passwort nur senden, wenn es geändert werden soll. Schreibend – Bestätigung nötig.',
+    parameters: {
+      type: 'object',
+      properties: {
+        mitarbeiterId: { type: 'string' },
+        vorname: { type: 'string' },
+        nachname: { type: 'string' },
+        benutzername: { type: 'string' },
+        passwort: { type: 'string' },
+        position: { type: 'string' },
+        stundenlohn: { type: 'number' },
+        status: { type: 'string', description: 'active | inactive' }
+      },
+      required: ['mitarbeiterId']
+    }
+  },
+
+  // --- Archivieren / Löschen ---
+  {
+    name: 'archiviereProjekt',
+    description: 'Archiviert ein Projekt (Status archived, nicht mehr aktiv). Schreibend – Bestätigung nötig.',
+    parameters: {
+      type: 'object',
+      properties: { projektId: { type: 'string' } },
+      required: ['projektId']
+    }
+  },
+  {
+    name: 'loescheMaschine',
+    description: 'Löscht eine Maschine/ein Fahrzeug. Schreibend – Bestätigung nötig.',
+    parameters: {
+      type: 'object',
+      properties: { maschineId: { type: 'string' } },
+      required: ['maschineId']
+    }
+  },
+  {
+    name: 'deaktiviereMitarbeiter',
+    description: 'Deaktiviert einen Mitarbeiter (Status inactive). Schreibend – Bestätigung nötig.',
+    parameters: {
+      type: 'object',
+      properties: { mitarbeiterId: { type: 'string' } },
+      required: ['mitarbeiterId']
+    }
+  },
+  {
+    name: 'loescheMaschinenbuchung',
+    description: 'Löscht eine Maschinenbuchung (Fahrzeugnutzung) dauerhaft. Schreibend – Bestätigung nötig.',
+    parameters: {
+      type: 'object',
+      properties: { maschinenbuchungId: { type: 'string' } },
+      required: ['maschinenbuchungId']
+    }
+  },
+
+  // --- Urlaubsanträge ---
+  {
+    name: 'listeUrlaubsantraege',
+    description: 'Listet Urlaubsanträge mit ID, Mitarbeiter, Zeitraum, Typ und Status.',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'pending | approved | rejected | all (Standard pending)' }
+      }
+    }
+  },
+  {
+    name: 'genehmigeUrlaubsantrag',
+    description: 'Genehmigt einen Urlaubsantrag. Schreibend – Bestätigung nötig.',
+    parameters: {
+      type: 'object',
+      properties: { urlaubsantragId: { type: 'string' } },
+      required: ['urlaubsantragId']
+    }
+  },
+  {
+    name: 'lehneUrlaubsantragAb',
+    description: 'Lehnt einen Urlaubsantrag ab. Schreibend – Bestätigung nötig.',
+    parameters: {
+      type: 'object',
+      properties: {
+        urlaubsantragId: { type: 'string' },
+        grund: { type: 'string', description: 'Ablehnungsgrund.' }
+      },
+      required: ['urlaubsantragId', 'grund']
+    }
+  },
+
+  // --- Berichte / Auswertung ---
+  {
+    name: 'mitarbeiterStunden',
+    description:
+      'Summiert die Arbeitsstunden eines Mitarbeiters, optional in einem Zeitraum (YYYY-MM-DD).',
+    parameters: {
+      type: 'object',
+      properties: {
+        mitarbeiterId: { type: 'string' },
+        vonDatum: { type: 'string', description: 'YYYY-MM-DD, optional.' },
+        bisDatum: { type: 'string', description: 'YYYY-MM-DD, optional.' }
+      },
+      required: ['mitarbeiterId']
+    }
+  },
+  {
+    name: 'projektStunden',
+    description: 'Summiert Arbeitsstunden und Maschinenstunden eines Projekts.',
+    parameters: {
+      type: 'object',
+      properties: { projektId: { type: 'string' } },
+      required: ['projektId']
+    }
   }
 ]
 
@@ -304,7 +456,16 @@ const MUTATING_TOOLS = new Set([
   'trageMaschinenbuchungNach',
   'erstelleProjekt',
   'erstelleMaschine',
-  'erstelleMitarbeiter'
+  'erstelleMitarbeiter',
+  'aendereProjekt',
+  'aendereMaschine',
+  'aendereMitarbeiter',
+  'archiviereProjekt',
+  'loescheMaschine',
+  'deaktiviereMitarbeiter',
+  'loescheMaschinenbuchung',
+  'genehmigeUrlaubsantrag',
+  'lehneUrlaubsantragAb'
 ])
 
 // ---------------------------------------------------------------------------
@@ -393,9 +554,76 @@ async function summarizeMutation(name: string, args: Record<string, any>): Promi
       ]
         .filter(Boolean)
         .join('\n')
+    case 'aendereProjekt': {
+      const felder = changedFieldsSummary(args, {
+        name: 'Name',
+        kunde: 'Kunde',
+        adresse: 'Adresse',
+        beschreibung: 'Beschreibung',
+        status: 'Status',
+        startDatum: 'Start',
+        endDatum: 'Ende'
+      })
+      return `Projekt ändern: ${await projectNameById(args.projektId)}\n${felder}`
+    }
+    case 'aendereMaschine': {
+      const felder = changedFieldsSummary(args, {
+        name: 'Name',
+        typ: 'Typ',
+        kennzeichen: 'Kennzeichen',
+        stundensatz: 'Stundensatz',
+        aktiv: 'Aktiv'
+      })
+      return `Maschine ändern: ${await vehicleNameById(args.maschineId)}\n${felder}`
+    }
+    case 'aendereMitarbeiter': {
+      const felder = changedFieldsSummary(args, {
+        vorname: 'Vorname',
+        nachname: 'Nachname',
+        benutzername: 'Benutzername',
+        passwort: 'Passwort',
+        position: 'Position',
+        stundenlohn: 'Stundenlohn',
+        status: 'Status'
+      })
+      return `Mitarbeiter ändern: ${await employeeNameById(args.mitarbeiterId)}\n${felder}`
+    }
+    case 'archiviereProjekt':
+      return `Projekt ARCHIVIEREN: ${await projectNameById(args.projektId)}`
+    case 'loescheMaschine':
+      return `Maschine LÖSCHEN: ${await vehicleNameById(args.maschineId)}`
+    case 'deaktiviereMitarbeiter':
+      return `Mitarbeiter DEAKTIVIEREN: ${await employeeNameById(args.mitarbeiterId)}`
+    case 'loescheMaschinenbuchung':
+      return `Maschinenbuchung LÖSCHEN (unwiderruflich), ID: ${args.maschinenbuchungId}`
+    case 'genehmigeUrlaubsantrag':
+      return `Urlaubsantrag GENEHMIGEN:\n${await leaveLabel(args.urlaubsantragId)}`
+    case 'lehneUrlaubsantragAb':
+      return `Urlaubsantrag ABLEHNEN:\n${await leaveLabel(args.urlaubsantragId)}\nGrund: ${args.grund}`
     default:
       return `Aktion ${name} ausführen?`
   }
+}
+
+function changedFieldsSummary(args: Record<string, any>, labels: Record<string, string>): string {
+  const lines = Object.entries(labels)
+    .filter(([key]) => args[key] !== undefined && args[key] !== '')
+    .map(([key, label]) => {
+      if (key === 'passwort') return `${label} → (geändert)`
+      if (key === 'aktiv') return `${label} → ${args[key] ? 'ja' : 'nein'}`
+      return `${label} → ${args[key]}`
+    })
+  return lines.length ? lines.join('\n') : '(keine Felder angegeben)'
+}
+
+async function leaveLabel(id?: string): Promise<string> {
+  if (!id) return '—'
+  const all = await DataService.getAllLeaveRequests()
+  const r = all.find((x) => x.id === id)
+  if (!r) return `Antrag ${id}`
+  return `${r.employeeName || (await employeeNameById(r.employeeId))}: ${fmtDateTime(
+    r.startDate
+  )} – ${fmtDateTime(r.endDate)} (${r.type})`
 }
 
 // ---------------------------------------------------------------------------
@@ -609,6 +837,151 @@ async function executeTool(
       }
     }
 
+    // --- Bearbeiten ---
+    case 'aendereProjekt': {
+      const update: Record<string, any> = {}
+      if (args.name !== undefined) update.name = args.name
+      if (args.kunde !== undefined) update.client = args.kunde
+      if (args.adresse !== undefined) update.address = args.adresse
+      if (args.beschreibung !== undefined) update.description = args.beschreibung
+      if (args.status !== undefined && ['active', 'planned', 'completed', 'archived'].includes(args.status)) {
+        update.status = args.status
+        update.isActive = args.status === 'active'
+      }
+      if (args.startDatum) update.startDate = parseIsoDate(args.startDatum) || undefined
+      if (args.endDatum) update.endDate = parseIsoDate(args.endDatum) || undefined
+      if (Object.keys(update).length === 0) return { status: 'fehler', message: 'Keine Felder angegeben.' }
+      await DataService.updateProject(args.projektId, update)
+      return { status: 'erledigt', message: 'Projekt aktualisiert.' }
+    }
+    case 'aendereMaschine': {
+      const update: Partial<import('../types').Vehicle> = {}
+      if (args.name !== undefined) update.name = args.name
+      if (args.typ !== undefined) update.type = args.typ
+      if (args.kennzeichen !== undefined) update.licensePlate = args.kennzeichen
+      if (args.stundensatz !== undefined) update.hourlyRate = Number(args.stundensatz)
+      if (args.aktiv !== undefined) update.isActive = !!args.aktiv
+      if (Object.keys(update).length === 0) return { status: 'fehler', message: 'Keine Felder angegeben.' }
+      await DataService.updateVehicle(args.maschineId, update)
+      return { status: 'erledigt', message: 'Maschine aktualisiert.' }
+    }
+    case 'aendereMitarbeiter': {
+      const update: Record<string, any> = {}
+      if (args.vorname !== undefined) update.firstName = args.vorname
+      if (args.nachname !== undefined) update.lastName = args.nachname
+      if (args.vorname !== undefined || args.nachname !== undefined) {
+        const existing = await DataService.getAllEmployees()
+        const cur = existing.find((e) => e.id === args.mitarbeiterId)
+        update.name = `${args.vorname ?? cur?.firstName ?? ''} ${args.nachname ?? cur?.lastName ?? ''}`.trim()
+      }
+      if (args.benutzername !== undefined) update.username = args.benutzername
+      if (args.passwort) update.password = args.passwort
+      if (args.position !== undefined) update.position = args.position
+      if (args.stundenlohn !== undefined) update.hourlyRate = Number(args.stundenlohn)
+      if (args.status !== undefined && ['active', 'inactive'].includes(args.status)) update.status = args.status
+      if (Object.keys(update).length === 0) return { status: 'fehler', message: 'Keine Felder angegeben.' }
+      try {
+        await DataService.updateEmployee(args.mitarbeiterId, update)
+        return { status: 'erledigt', message: 'Mitarbeiter aktualisiert.' }
+      } catch (error: any) {
+        return { status: 'fehler', message: error?.message || 'Aktualisierung fehlgeschlagen.' }
+      }
+    }
+
+    // --- Archivieren / Löschen ---
+    case 'archiviereProjekt': {
+      await DataService.deleteProject(args.projektId)
+      return { status: 'erledigt', message: 'Projekt archiviert.' }
+    }
+    case 'loescheMaschine': {
+      await DataService.deleteVehicle(args.maschineId)
+      return { status: 'erledigt', message: 'Maschine gelöscht.' }
+    }
+    case 'deaktiviereMitarbeiter': {
+      try {
+        await DataService.deleteEmployee(args.mitarbeiterId)
+        return { status: 'erledigt', message: 'Mitarbeiter deaktiviert.' }
+      } catch (error: any) {
+        return { status: 'fehler', message: error?.message || 'Deaktivierung fehlgeschlagen.' }
+      }
+    }
+    case 'loescheMaschinenbuchung': {
+      await DataService.deleteVehicleUsage(args.maschinenbuchungId)
+      return { status: 'erledigt', message: 'Maschinenbuchung gelöscht.' }
+    }
+
+    // --- Urlaubsanträge ---
+    case 'listeUrlaubsantraege': {
+      const all = await DataService.getAllLeaveRequests()
+      const filter = ['pending', 'approved', 'rejected'].includes(args.status) ? args.status : null
+      const filtered = filter ? all.filter((r) => r.status === filter) : all
+      return {
+        urlaubsantraege: await Promise.all(
+          filtered.map(async (r) => ({
+            id: r.id,
+            mitarbeiter: r.employeeName || (await employeeNameById(r.employeeId)),
+            von: fmtDateTime(r.startDate),
+            bis: fmtDateTime(r.endDate),
+            typ: r.type,
+            tage: r.workingDays,
+            status: r.status
+          }))
+        )
+      }
+    }
+    case 'genehmigeUrlaubsantrag': {
+      await DataService.approveLeaveRequest(args.urlaubsantragId, admin.name || 'Administrator')
+      return { status: 'erledigt', message: 'Urlaubsantrag genehmigt.' }
+    }
+    case 'lehneUrlaubsantragAb': {
+      await DataService.rejectLeaveRequest(args.urlaubsantragId, args.grund || '')
+      return { status: 'erledigt', message: 'Urlaubsantrag abgelehnt.' }
+    }
+
+    // --- Berichte ---
+    case 'mitarbeiterStunden': {
+      const entries = await DataService.getTimeEntriesByEmployeeId(args.mitarbeiterId)
+      const von = args.vonDatum ? parseIsoDate(args.vonDatum) : null
+      const bis = args.bisDatum ? parseIsoDate(args.bisDatum) : null
+      if (bis) bis.setHours(23, 59, 59, 999)
+      let summe = 0
+      let anzahl = 0
+      for (const e of entries) {
+        const start = toJsDate(e.clockInTime)
+        if (!start) continue
+        if (von && start.getTime() < von.getTime()) continue
+        if (bis && start.getTime() > bis.getTime()) continue
+        const h = durationHours(e)
+        if (h != null) {
+          summe += h
+          anzahl++
+        }
+      }
+      return {
+        mitarbeiter: await employeeNameById(args.mitarbeiterId),
+        zeitraum: `${args.vonDatum || 'Anfang'} – ${args.bisDatum || 'heute'}`,
+        anzahlEintraege: anzahl,
+        gesamtStunden: Math.round(summe * 100) / 100
+      }
+    }
+    case 'projektStunden': {
+      const entries = await DataService.getTimeEntriesByProject(args.projektId)
+      let arbeit = 0
+      for (const e of entries) {
+        const h = durationHours(e)
+        if (h != null) arbeit += h
+      }
+      const usages = await DataService.getVehicleUsagesByProject(args.projektId)
+      let maschine = 0
+      for (const u of usages) maschine += Number(u.hours ?? u.hoursUsed ?? 0)
+      return {
+        projekt: await projectNameById(args.projektId),
+        arbeitsStunden: Math.round(arbeit * 100) / 100,
+        maschinenStunden: Math.round(maschine * 100) / 100,
+        anzahlZeiteintraege: entries.length
+      }
+    }
+
     default:
       return { status: 'fehler', message: `Unbekannte Aktion: ${name}` }
   }
@@ -627,7 +1000,7 @@ function buildSystemInstruction(admin: AdminInfo): string {
   })
   return [
     'Du bist „Mörgel", der freundliche KI-Assistent im Admin-Panel der Lauffer Zeiterfassung (Gartenbau · Erdbau · Natursteinhandel).',
-    `Du hilfst dem Administrator${admin.name ? ` (${admin.name})` : ''}, die App zu steuern: Zeiteinträge ändern, Pausen setzen, umbuchen, nachtragen, Maschinenbuchungen nachtragen sowie Projekte, Maschinen und Mitarbeiter anlegen.`,
+    `Du hilfst dem Administrator${admin.name ? ` (${admin.name})` : ''}, die App umfassend zu steuern: Zeiteinträge ändern/anlegen/umbuchen/löschen, Pausen setzen, Maschinenbuchungen nachtragen/löschen, Projekte/Maschinen/Mitarbeiter anlegen, bearbeiten und archivieren/deaktivieren, Urlaubsanträge anzeigen/genehmigen/ablehnen sowie Stunden-Auswertungen für Mitarbeiter und Projekte erstellen.`,
     `Heutiges Datum: ${heute}. Rechne relative Angaben wie „gestern" oder „letzten Montag" in konkrete Daten um.`,
     'Antworte immer auf Deutsch, kurz und klar.',
     'Ermittle IDs IMMER zuerst über die Lese-Funktionen (listeMitarbeiter, listeProjekte, listeMaschinen, findeZeiteintraege, findeMaschinenbuchungen). Erfinde niemals IDs.',
