@@ -1428,10 +1428,13 @@ class DataServiceClass {
     await this.authReadyPromise
     try {
       const vehiclesRef = collection(db, 'vehicles')
-      const docRef = await addDoc(vehiclesRef, {
-        ...vehicleData,
-        createdAt: new Date()
-      })
+      // Firestore lehnt undefined-Felder ab (z. B. leeres Kennzeichen/Stundensatz) — herausfiltern
+      const payload = Object.fromEntries(
+        Object.entries({ ...vehicleData, createdAt: new Date() }).filter(
+          ([, value]) => value !== undefined
+        )
+      )
+      const docRef = await addDoc(vehiclesRef, payload)
       return docRef.id
     } catch (error) {
       console.error('Fehler beim Erstellen des Fahrzeugs:', error)
@@ -1766,7 +1769,11 @@ class DataServiceClass {
         }
       }
 
-      const docRef = await addDoc(employeesRef, employeeData)
+      // Firestore lehnt undefined-Felder ab (z. B. leere Position/Stundenlohn) — herausfiltern
+      const payload = Object.fromEntries(
+        Object.entries(employeeData).filter(([, value]) => value !== undefined)
+      )
+      const docRef = await addDoc(employeesRef, payload)
       return docRef.id
     } catch (error) {
       console.error('Fehler beim Erstellen des Mitarbeiters:', error)
