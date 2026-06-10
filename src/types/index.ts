@@ -152,6 +152,11 @@ export interface LeaveRequest {
   updatedAt?: Date | any
   approvedBy?: string
   approvedAt?: Date | any
+  /** Einzelne Urlaubstage, die z. B. durch tatsächliches Stempeln wieder gutgeschrieben wurden. */
+  cancelledDates?: string[]
+  autoCancelledAt?: Date | any
+  autoCancellationReason?: string
+  autoCancelledByTimeEntryId?: string
   rejectionReason?: string
 }
 
