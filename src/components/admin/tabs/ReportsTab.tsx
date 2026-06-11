@@ -1,20 +1,27 @@
 import { useState, useEffect, useRef } from 'react'
 import { DataService } from '../../../services/dataService'
-import type { Employee, TimeEntry, Project, Vehicle, VehicleUsage, FileUpload, TimeReportSettlement } from '../../../types'
+import type { Employee, TimeEntry, Project, Vehicle, VehicleUsage, FileUpload, TimeReportSettlement, LeaveRequest } from '../../../types'
 import { toast } from '../../ToastContainer'
 import { formatDateForInputLocal } from '../../../utils/dateUtils'
+import { getBavariaHolidayName } from '../../../utils/bavariaHolidays'
 import { collectEntryDocumentation } from '../../../utils/entryDocumentation'
 import { getFileImageSrc } from '../../../utils/fileImageSrc'
 import '../../../styles/AdminTabs.css'
 import '../../../styles/ReportPrint.css'
 
 type ReportType = 'employee' | 'project'
+type ReportEntrySource = 'time-entry' | 'leave-request'
+
+const VACATION_WORK_MINUTES = 10 * 60
+const VACATION_WORK_HOURS_LABEL = '10:00'
 
 interface ReportEntry {
   id: string
   originalEntry: TimeEntry
+  source: ReportEntrySource
   date: string
   dateRaw: Date | null
+  dateKey: string
   projectId: string
   projectName: string
   clockIn: string
@@ -25,6 +32,8 @@ interface ReportEntry {
   notes: string
   originalNotes: string
   isEdited: boolean
+  isReadOnly?: boolean
+  holidayName?: string | null
 }
 
 interface EmployeeSummary {
@@ -83,6 +92,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
   const [employeeSettlement, setEmployeeSettlement] = useState<TimeReportSettlement | null>(null)
   const [employeeReportView, setEmployeeReportView] = useState<'full' | 'remainder'>('full')
   const [isSavingSettlement, setIsSavingSettlement] = useState(false)
+  const [savingProjectMoveEntryIds, setSavingProjectMoveEntryIds] = useState<Set<string>>(new Set())
 
   // Projekt-Bericht States
   const [selectedProjectId, setSelectedProjectId] = useState('')
@@ -141,6 +151,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     setReportEntries([])
     setEmployeeSettlement(null)
     setEmployeeReportView('full')
+    setSavingProjectMoveEntryIds(new Set())
     setEmployeeSummaries([])
     setVehicleSummaries([])
     setProjectPhotos([])
@@ -194,6 +205,90 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     })
   }
 
+  const parseDateInputAsLocalDate = (value: string): Date | null => {
+    if (!value) return null
+    const date = new Date(`${value}T12:00:00`)
+    return isNaN(date.getTime()) ? null : date
+  }
+
+  const getDateKey = (date: Date): string => formatDateForInputLocal(date)
+
+  const isWeekendDate = (date: Date): boolean => {
+    const day = date.getDay()
+    return day === 0 || day === 6
+  }
+
+  const getWeekStart = (date: Date): Date => {
+    const start = new Date(date)
+    start.setHours(12, 0, 0, 0)
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+    return start
+  }
+
+  const getWeekEnd = (date: Date): Date => {
+    const end = getWeekStart(date)
+    end.setDate(end.getDate() + 6)
+    return end
+  }
+
+  const enumerateDays = (start: Date, end: Date): Date[] => {
+    const days: Date[] = []
+    const current = new Date(start)
+    current.setHours(12, 0, 0, 0)
+    const last = new Date(end)
+    last.setHours(12, 0, 0, 0)
+    while (current <= last) {
+      days.push(new Date(current))
+      current.setDate(current.getDate() + 1)
+    }
+    return days
+  }
+
+  const isLeaveDateCancelled = (request: LeaveRequest, dateKey: string): boolean =>
+    (request.cancelledDates || []).some((key) => String(key).slice(0, 10) === dateKey)
+
+  const getApprovedVacationDates = (
+    requests: LeaveRequest[],
+    rangeStart: Date,
+    rangeEnd: Date,
+    occupiedTimeEntryDates: Set<string>
+  ): Array<{ date: Date; request: LeaveRequest }> => {
+    const vacationDates = new Map<string, { date: Date; request: LeaveRequest }>()
+    const start = new Date(rangeStart)
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(rangeEnd)
+    end.setHours(23, 59, 59, 999)
+
+    for (const request of requests) {
+      if (request.status !== 'approved' || request.type !== 'vacation') continue
+      const reqStart = convertToDate(request.startDate)
+      const reqEnd = convertToDate(request.endDate)
+      if (!reqStart || !reqEnd) continue
+
+      const first = new Date(Math.max(
+        new Date(reqStart.getFullYear(), reqStart.getMonth(), reqStart.getDate()).getTime(),
+        start.getTime()
+      ))
+      const last = new Date(Math.min(
+        new Date(reqEnd.getFullYear(), reqEnd.getMonth(), reqEnd.getDate()).getTime(),
+        end.getTime()
+      ))
+      if (last < first) continue
+
+      for (const date of enumerateDays(first, last)) {
+        const dateKey = getDateKey(date)
+        if (isWeekendDate(date)) continue
+        if (occupiedTimeEntryDates.has(dateKey)) continue
+        if (isLeaveDateCancelled(request, dateKey)) continue
+        if (!vacationDates.has(dateKey)) {
+          vacationDates.set(dateKey, { date, request })
+        }
+      }
+    }
+
+    return [...vacationDates.values()].sort((a, b) => a.date.getTime() - b.date.getTime())
+  }
+
   const formatTimeForInput = (date: Date | null): string => {
     if (!date) return ''
     return date.toLocaleTimeString('de-DE', {
@@ -239,6 +334,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
   }
 
   const workMinutesFromOriginalEntry = (entry: TimeEntry): number => {
+    if (entry.isVacationDay) return VACATION_WORK_MINUTES
     const clockInDate = convertToDate(entry.clockInTime)
     const clockOutDate = convertToDate(entry.clockOutTime)
     const cin = formatTimeForInput(clockInDate)
@@ -266,7 +362,10 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     setHasSearched(true)
 
     try {
-      const allEntries = await DataService.getTimeEntriesByEmployeeId(selectedEmployeeId)
+      const [allEntries, leaveRequests] = await Promise.all([
+        DataService.getTimeEntriesByEmployeeId(selectedEmployeeId),
+        DataService.getLeaveRequestsByEmployee(selectedEmployeeId)
+      ])
       const start = new Date(startDate)
       start.setHours(0, 0, 0, 0)
       const end = new Date(endDate)
@@ -309,8 +408,10 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
         return {
           id: entry.id,
           originalEntry: entry,
+          source: 'time-entry',
           date: clockInDate ? formatDateForDisplay(clockInDate) : '-',
           dateRaw: clockInDate,
+          dateKey: clockInDate ? getDateKey(clockInDate) : '',
           projectId: entry.projectId,
           projectName: getProjectName(entry.projectId),
           clockIn,
@@ -320,13 +421,75 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
           workHours: calculateWorkHours(clockIn, clockOut, pauseMinutes),
           notes: collectEntryDocumentation(entry, filesByEntryId.get(entry.id) || []),
           originalNotes: collectEntryDocumentation(entry, filesByEntryId.get(entry.id) || []),
-          isEdited: false
+          isEdited: false,
+          holidayName: clockInDate ? getBavariaHolidayName(clockInDate) : null
         }
       })
 
-      setReportEntries(entries)
+      const occupiedTimeEntryDates = new Set(
+        entries
+          .map((entry) => entry.dateKey)
+          .filter((dateKey) => !!dateKey)
+      )
+      const vacationEntries: ReportEntry[] = getApprovedVacationDates(
+        leaveRequests,
+        start,
+        end,
+        occupiedTimeEntryDates
+      ).map(({ date, request }) => {
+        const dateKey = getDateKey(date)
+        const syntheticClockIn = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 7, 0, 0, 0)
+        const syntheticClockOut = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 17, 0, 0, 0)
+        const reason = (request.reason || '').trim()
+        const notes = reason
+          ? `Genehmigter Urlaub (${VACATION_WORK_HOURS_LABEL} Arbeitsstunden): ${reason}`
+          : `Genehmigter Urlaub (${VACATION_WORK_HOURS_LABEL} Arbeitsstunden)`
+        const originalEntry: TimeEntry = {
+          id: `vacation-${request.id || dateKey}-${dateKey}`,
+          employeeId: selectedEmployeeId,
+          projectId: 'vacation',
+          clockInTime: syntheticClockIn,
+          clockOutTime: syntheticClockOut,
+          pauseTotalTime: 0,
+          notes,
+          isVacationDay: true
+        }
+
+        return {
+          id: originalEntry.id,
+          originalEntry,
+          source: 'leave-request',
+          date: formatDateForDisplay(date),
+          dateRaw: date,
+          dateKey,
+          projectId: 'vacation',
+          projectName: 'Urlaub',
+          clockIn: '',
+          clockOut: '',
+          pauseMinutes: 0,
+          pauseMs: 0,
+          workHours: VACATION_WORK_HOURS_LABEL,
+          notes,
+          originalNotes: notes,
+          isEdited: false,
+          isReadOnly: true,
+          holidayName: getBavariaHolidayName(date)
+        }
+      })
+
+      const reportRows = [...entries, ...vacationEntries].sort((a, b) => {
+        const ta = a.dateRaw?.getTime() || 0
+        const tb = b.dateRaw?.getTime() || 0
+        if (ta !== tb) return ta - tb
+        if (a.source !== b.source) return a.source === 'time-entry' ? -1 : 1
+        return a.id.localeCompare(b.id)
+      })
+
+      setReportEntries(reportRows)
       const emp = employees.find(e => e.id === selectedEmployeeId)
-      setSelectedEmployeeName(emp?.name || `${emp?.firstName} ${emp?.lastName}` || '')
+      setSelectedEmployeeName(
+        emp ? (emp.name || `${emp.firstName || ''} ${emp.lastName || ''}`.trim()) : ''
+      )
 
       const settlement = await DataService.getTimeReportSettlement(selectedEmployeeId, startDate, endDate)
       setEmployeeSettlement(settlement)
@@ -342,10 +505,15 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     setReportEntries(prev => {
       const updated = [...prev]
       const entry = { ...updated[index] }
+      if (entry.isReadOnly) return prev
       if (field === 'clockIn') entry.clockIn = value as string
       else if (field === 'clockOut') entry.clockOut = value as string
       else if (field === 'pauseMinutes') entry.pauseMinutes = Number(value) || 0
       else if (field === 'projectName') entry.projectName = value as string
+      else if (field === 'projectId') {
+        entry.projectId = value as string
+        entry.projectName = getProjectName(value as string)
+      }
       entry.workHours = calculateWorkHours(entry.clockIn, entry.clockOut, entry.pauseMinutes)
       entry.isEdited = true
       updated[index] = entry
@@ -365,6 +533,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       const pauseMinutes = msToMinutes(pauseMs)
       updated[index] = {
         ...updated[index],
+        projectId: original.projectId,
         projectName: getProjectName(original.projectId),
         clockIn, clockOut, pauseMinutes, pauseMs,
         notes: updated[index].originalNotes,
@@ -373,6 +542,47 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       }
       return updated
     })
+  }
+
+  const isProjectMovePending = (entry: ReportEntry): boolean =>
+    entry.source === 'time-entry' &&
+    !entry.isReadOnly &&
+    !!entry.projectId &&
+    entry.projectId !== entry.originalEntry.projectId
+
+  const handleSaveEntryProjectMove = async (index: number) => {
+    const entry = reportEntries[index]
+    if (!entry || !isProjectMovePending(entry)) return
+
+    if (!entry.originalEntry.clockOutTime) {
+      toast.error('Offene Stempelungen können nicht verschoben werden. Bitte zuerst ausstempeln.')
+      return
+    }
+
+    const sourceProjectName = getProjectName(entry.originalEntry.projectId)
+    const targetProjectName = getProjectName(entry.projectId)
+    const ok = window.confirm(
+      `Diesen Stempelsatz wirklich von „${sourceProjectName}“ nach „${targetProjectName}“ verschieben? Zugehörige Dokumentation und passende Fahrzeugbuchungen werden mit umgezogen.`
+    )
+    if (!ok) return
+
+    setSavingProjectMoveEntryIds(prev => new Set(prev).add(entry.id))
+    try {
+      await DataService.moveTimeEntryToProject(entry.id, entry.projectId, {
+        sourceProjectName,
+        targetProjectName
+      })
+      toast.success('Projekt für diese Zeile wurde geändert.')
+      await handleEmployeeSearch()
+    } catch (error: any) {
+      toast.error(error?.message || 'Projektwechsel fehlgeschlagen')
+    } finally {
+      setSavingProjectMoveEntryIds(prev => {
+        const next = new Set(prev)
+        next.delete(entry.id)
+        return next
+      })
+    }
   }
 
   const calculateTotalHours = (): string => {
@@ -904,17 +1114,150 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     return escapeHtml(notes).replace(/\n/g, '<br />')
   }
 
+  interface EmployeePrintRow {
+    id: string
+    date: Date
+    dateKey: string
+    dateLabel: string
+    projectName: string
+    clockIn: string
+    clockOut: string
+    pauseMinutes: number | null
+    notes: string
+    workHours: string
+    workMinutes: number
+    holidayName: string | null
+    isWeekend: boolean
+    isVacation: boolean
+    isEmpty: boolean
+  }
+
+  const workMinutesFromReportEntry = (entry: ReportEntry): number => {
+    if (entry.workHours && entry.workHours !== '-') {
+      const [h, m] = entry.workHours.split(':').map(Number)
+      if (Number.isFinite(h) && Number.isFinite(m)) return h * 60 + m
+    }
+    return 0
+  }
+
+  const buildPrintDateCellHtml = (row: EmployeePrintRow): string => {
+    const notes: string[] = []
+    if (row.isWeekend) notes.push('Wochenende')
+    if (row.holidayName) notes.push(`Feiertag: ${row.holidayName}`)
+    if (notes.length === 0) return escapeHtml(row.dateLabel)
+    return `${escapeHtml(row.dateLabel)}<br /><span class="day-subnote">${escapeHtml(notes.join(' · '))}</span>`
+  }
+
+  const buildEmployeePrintRows = (): EmployeePrintRow[] => {
+    const selectedStart = parseDateInputAsLocalDate(startDate)
+    const selectedEnd = parseDateInputAsLocalDate(endDate)
+    const fallbackDates = reportEntries
+      .map((entry) => entry.dateRaw)
+      .filter((date): date is Date => !!date)
+      .sort((a, b) => a.getTime() - b.getTime())
+    const firstDate = selectedStart || fallbackDates[0]
+    const lastDate = selectedEnd || fallbackDates[fallbackDates.length - 1]
+    if (!firstDate || !lastDate) return []
+
+    const weekStart = getWeekStart(firstDate)
+    const weekEnd = getWeekEnd(lastDate)
+    const entriesByDate = new Map<string, ReportEntry[]>()
+    for (const entry of reportEntries) {
+      if (!entry.dateRaw) continue
+      const dateKey = entry.dateKey || getDateKey(entry.dateRaw)
+      const list = entriesByDate.get(dateKey) || []
+      list.push(entry)
+      entriesByDate.set(dateKey, list)
+    }
+
+    const rows: EmployeePrintRow[] = []
+    for (const date of enumerateDays(weekStart, weekEnd)) {
+      const dateKey = getDateKey(date)
+      const dateLabel = formatDateForDisplay(date)
+      const holidayName = getBavariaHolidayName(date)
+      const isWeekend = isWeekendDate(date)
+      const entriesForDay = entriesByDate.get(dateKey) || []
+
+      if (entriesForDay.length > 0) {
+        entriesForDay.forEach((entry, index) => {
+          const notes = [
+            entry.notes,
+            entry.source === 'leave-request' ? '' : '',
+            holidayName ? `Feiertag: ${holidayName}` : '',
+            isWeekend ? 'Wochenende' : ''
+          ]
+            .map((value) => value.trim())
+            .filter(Boolean)
+            .join('\n')
+          rows.push({
+            id: `${entry.id}-${index}`,
+            date,
+            dateKey,
+            dateLabel,
+            projectName: entry.projectName,
+            clockIn: entry.clockIn || '—',
+            clockOut: entry.clockOut || '—',
+            pauseMinutes: entry.pauseMinutes,
+            notes,
+            workHours: entry.workHours || '0:00',
+            workMinutes: workMinutesFromReportEntry(entry),
+            holidayName,
+            isWeekend,
+            isVacation: entry.source === 'leave-request',
+            isEmpty: false
+          })
+        })
+        continue
+      }
+
+      const notes = [
+        holidayName ? `Feiertag: ${holidayName}` : '',
+        isWeekend ? 'Wochenende' : ''
+      ].filter(Boolean)
+
+      rows.push({
+        id: `empty-${dateKey}`,
+        date,
+        dateKey,
+        dateLabel,
+        projectName: holidayName ? 'Feiertag' : isWeekend ? 'Wochenende' : '—',
+        clockIn: '—',
+        clockOut: '—',
+        pauseMinutes: null,
+        notes: notes.join('\n'),
+        workHours: '0:00',
+        workMinutes: 0,
+        holidayName,
+        isWeekend,
+        isVacation: false,
+        isEmpty: true
+      })
+    }
+
+    return rows
+  }
+
+  const calculateEmployeePrintTotalHours = (rows: EmployeePrintRow[]): string =>
+    minutesToHoursLabel(rows.reduce((sum, row) => sum + row.workMinutes, 0))
+
   const buildEmployeePrintHtml = (): string => {
-    const rowsHtml = reportEntries
-      .map((entry) => {
+    const printRows = buildEmployeePrintRows()
+    const rowsHtml = printRows
+      .map((row) => {
+        const classes = [
+          row.isWeekend ? 'weekend-row' : '',
+          row.holidayName ? 'holiday-row' : '',
+          row.isVacation ? 'vacation-row' : '',
+          row.isEmpty ? 'empty-row' : ''
+        ].filter(Boolean).join(' ')
         return `<tr>
-  <td>${escapeHtml(entry.date)}</td>
-  <td>${escapeHtml(entry.projectName)}</td>
-  <td>${escapeHtml(entry.clockIn)}</td>
-  <td>${escapeHtml(entry.clockOut)}</td>
-  <td>${entry.pauseMinutes}</td>
-  <td class="doc-cell">${formatNotesForPrintHtml(entry.notes)}</td>
-  <td>${escapeHtml(entry.workHours)}</td>
+  <td class="date-print-cell ${classes}">${buildPrintDateCellHtml(row)}</td>
+  <td>${escapeHtml(row.projectName)}</td>
+  <td>${escapeHtml(row.clockIn)}</td>
+  <td>${escapeHtml(row.clockOut)}</td>
+  <td>${row.pauseMinutes ?? '—'}</td>
+  <td class="doc-cell">${formatNotesForPrintHtml(row.notes)}</td>
+  <td>${escapeHtml(row.workHours)}</td>
 </tr>`
       })
       .join('')
@@ -972,6 +1315,25 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     .right {
       text-align: right;
     }
+    .day-subnote {
+      display: inline-block;
+      margin-top: 2px;
+      color: #555;
+      font-size: 11px;
+      line-height: 1.25;
+    }
+    .date-print-cell.weekend-row,
+    tr:has(.date-print-cell.weekend-row) {
+      background: #f8f8f8;
+    }
+    .date-print-cell.holiday-row,
+    tr:has(.date-print-cell.holiday-row) {
+      background: #fff7df;
+    }
+    .date-print-cell.vacation-row,
+    tr:has(.date-print-cell.vacation-row) {
+      background: #eaf5ea;
+    }
     @page {
       margin: 12mm;
       size: A4 portrait;
@@ -1002,7 +1364,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     <tfoot>
       <tr>
         <td colspan="6">Gesamt:</td>
-        <td class="right">${escapeHtml(calculateTotalHours())}</td>
+        <td class="right">${escapeHtml(calculateEmployeePrintTotalHours(printRows))}</td>
       </tr>
     </tfoot>
   </table>
@@ -1295,53 +1657,112 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {reportEntries.map((entry, index) => (
-                        <tr key={entry.id} className={entry.isEdited ? 'edited-row' : ''}>
-                          <td className="date-cell">{entry.date}</td>
-                          <td>
-                            <input
-                              type="text"
-                              value={entry.projectName}
-                              onChange={e => handleFieldChange(index, 'projectName', e.target.value)}
-                              className="inline-edit"
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="time"
-                              value={entry.clockIn}
-                              onChange={e => handleFieldChange(index, 'clockIn', e.target.value)}
-                              className="inline-edit time-input"
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="time"
-                              value={entry.clockOut}
-                              onChange={e => handleFieldChange(index, 'clockOut', e.target.value)}
-                              className="inline-edit time-input"
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              min="0"
-                              value={entry.pauseMinutes}
-                              onChange={e => handleFieldChange(index, 'pauseMinutes', e.target.value)}
-                              className="inline-edit pause-input"
-                            />
-                          </td>
-                          <td className="comment-cell">{entry.notes || '—'}</td>
-                          <td className="hours-cell">{entry.workHours}</td>
-                          <td className="no-print actions-cell">
-                            {entry.isEdited && (
-                              <button type="button" onClick={() => handleResetEntry(index)} className="reset-btn">
-                                Zurück
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {reportEntries.map((entry, index) => {
+                        const projectMovePending = isProjectMovePending(entry)
+                        const isSavingProjectMove = savingProjectMoveEntryIds.has(entry.id)
+                        const canMoveProject = entry.source === 'time-entry' && !!entry.originalEntry.clockOutTime
+                        const projectOptions = projects.some(project => project.id === entry.projectId)
+                          ? projects
+                          : [{ id: entry.projectId, name: entry.projectName } as Project, ...projects]
+                        return (
+                          <tr
+                            key={entry.id}
+                            className={[
+                              entry.isEdited ? 'edited-row' : '',
+                              entry.source === 'leave-request' ? 'vacation-report-row' : '',
+                              entry.holidayName ? 'holiday-report-row' : ''
+                            ].filter(Boolean).join(' ')}
+                          >
+                            <td className="date-cell">
+                              {entry.date}
+                              {entry.holidayName && (
+                                <span className="day-marker">Feiertag: {entry.holidayName}</span>
+                              )}
+                            </td>
+                            <td>
+                              {entry.source === 'time-entry' ? (
+                                <select
+                                  value={entry.projectId}
+                                  onChange={e => handleFieldChange(index, 'projectId', e.target.value)}
+                                  className="inline-edit project-inline-select"
+                                  disabled={!canMoveProject || isSavingProjectMove}
+                                  title={
+                                    canMoveProject
+                                      ? 'Projekt für diesen Stempelsatz ändern'
+                                      : 'Offene Stempelungen können erst nach dem Ausstempeln verschoben werden'
+                                  }
+                                >
+                                  {projectOptions.map(project => (
+                                    <option key={project.id} value={project.id}>
+                                      {project.name || `Projekt ${project.id}`}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={entry.projectName}
+                                  className="inline-edit"
+                                  disabled
+                                  readOnly
+                                />
+                              )}
+                            </td>
+                            <td>
+                              <input
+                                type="time"
+                                value={entry.clockIn}
+                                onChange={e => handleFieldChange(index, 'clockIn', e.target.value)}
+                                className="inline-edit time-input"
+                                disabled={entry.isReadOnly}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="time"
+                                value={entry.clockOut}
+                                onChange={e => handleFieldChange(index, 'clockOut', e.target.value)}
+                                className="inline-edit time-input"
+                                disabled={entry.isReadOnly}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                value={entry.pauseMinutes}
+                                onChange={e => handleFieldChange(index, 'pauseMinutes', e.target.value)}
+                                className="inline-edit pause-input"
+                                disabled={entry.isReadOnly}
+                              />
+                            </td>
+                            <td className="comment-cell">{entry.notes || '—'}</td>
+                            <td className="hours-cell">{entry.workHours}</td>
+                            <td className="no-print actions-cell actions-cell-wide">
+                              {projectMovePending && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveEntryProjectMove(index)}
+                                  className="save-project-btn"
+                                  disabled={isSavingProjectMove}
+                                >
+                                  {isSavingProjectMove ? 'Speichert…' : 'Projekt speichern'}
+                                </button>
+                              )}
+                              {entry.isEdited && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResetEntry(index)}
+                                  className="reset-btn"
+                                  disabled={isSavingProjectMove}
+                                >
+                                  Zurück
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="total-row">

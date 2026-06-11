@@ -314,6 +314,38 @@
   box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.1);
 }
 
+.inline-edit:disabled {
+  opacity: 1;
+  cursor: default;
+  color: var(--text-color);
+}
+
+.project-inline-select {
+  min-width: 180px;
+  cursor: pointer;
+}
+
+.project-inline-select:disabled {
+  cursor: not-allowed;
+}
+
+.report-table tbody tr.vacation-report-row {
+  background: rgba(74, 124, 89, 0.08);
+}
+
+.report-table tbody tr.holiday-report-row {
+  background: rgba(255, 193, 7, 0.12);
+}
+
+.date-cell .day-marker {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: normal;
+}
+
 .time-input {
   width: 90px;
   text-align: center;
@@ -339,6 +371,17 @@
   text-align: center;
 }
 
+.actions-cell-wide {
+  min-width: 150px;
+}
+
+.actions-cell-wide .save-project-btn,
+.actions-cell-wide .reset-btn {
+  display: block;
+  width: 100%;
+  margin: 0 0 6px;
+}
+
 .reset-btn {
   background: var(--light-color);
   border: 1px solid var(--border-color);
@@ -356,6 +399,29 @@
   background: var(--card-background);
   color: var(--text-color);
   border-color: var(--medium-gray);
+}
+
+.save-project-btn {
+  background: var(--primary-color);
+  border: 1px solid var(--primary-color);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: #fff;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  min-height: 30px;
+}
+
+.save-project-btn:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.save-project-btn:disabled,
+.reset-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .total-row {
