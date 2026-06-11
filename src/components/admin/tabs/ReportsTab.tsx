@@ -92,6 +92,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
   const [employeeSettlement, setEmployeeSettlement] = useState<TimeReportSettlement | null>(null)
   const [employeeReportView, setEmployeeReportView] = useState<'full' | 'remainder'>('full')
   const [isSavingSettlement, setIsSavingSettlement] = useState(false)
+  const [savingProjectMoveEntryIds, setSavingProjectMoveEntryIds] = useState<Set<string>>(new Set())
 
   // Projekt-Bericht States
   const [selectedProjectId, setSelectedProjectId] = useState('')
@@ -150,6 +151,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     setReportEntries([])
     setEmployeeSettlement(null)
     setEmployeeReportView('full')
+    setSavingProjectMoveEntryIds(new Set())
     setEmployeeSummaries([])
     setVehicleSummaries([])
     setProjectPhotos([])
@@ -508,6 +510,10 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       else if (field === 'clockOut') entry.clockOut = value as string
       else if (field === 'pauseMinutes') entry.pauseMinutes = Number(value) || 0
       else if (field === 'projectName') entry.projectName = value as string
+      else if (field === 'projectId') {
+        entry.projectId = value as string
+        entry.projectName = getProjectName(value as string)
+      }
       entry.workHours = calculateWorkHours(entry.clockIn, entry.clockOut, entry.pauseMinutes)
       entry.isEdited = true
       updated[index] = entry
@@ -527,6 +533,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       const pauseMinutes = msToMinutes(pauseMs)
       updated[index] = {
         ...updated[index],
+        projectId: original.projectId,
         projectName: getProjectName(original.projectId),
         clockIn, clockOut, pauseMinutes, pauseMs,
         notes: updated[index].originalNotes,
@@ -535,6 +542,47 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       }
       return updated
     })
+  }
+
+  const isProjectMovePending = (entry: ReportEntry): boolean =>
+    entry.source === 'time-entry' &&
+    !entry.isReadOnly &&
+    !!entry.projectId &&
+    entry.projectId !== entry.originalEntry.projectId
+
+  const handleSaveEntryProjectMove = async (index: number) => {
+    const entry = reportEntries[index]
+    if (!entry || !isProjectMovePending(entry)) return
+
+    if (!entry.originalEntry.clockOutTime) {
+      toast.error('Offene Stempelungen können nicht verschoben werden. Bitte zuerst ausstempeln.')
+      return
+    }
+
+    const sourceProjectName = getProjectName(entry.originalEntry.projectId)
+    const targetProjectName = getProjectName(entry.projectId)
+    const ok = window.confirm(
+      `Diesen Stempelsatz wirklich von „${sourceProjectName}“ nach „${targetProjectName}“ verschieben? Zugehörige Dokumentation und passende Fahrzeugbuchungen werden mit umgezogen.`
+    )
+    if (!ok) return
+
+    setSavingProjectMoveEntryIds(prev => new Set(prev).add(entry.id))
+    try {
+      await DataService.moveTimeEntryToProject(entry.id, entry.projectId, {
+        sourceProjectName,
+        targetProjectName
+      })
+      toast.success('Projekt für diese Zeile wurde geändert.')
+      await handleEmployeeSearch()
+    } catch (error: any) {
+      toast.error(error?.message || 'Projektwechsel fehlgeschlagen')
+    } finally {
+      setSavingProjectMoveEntryIds(prev => {
+        const next = new Set(prev)
+        next.delete(entry.id)
+        return next
+      })
+    }
   }
 
   const calculateTotalHours = (): string => {
@@ -1609,69 +1657,112 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {reportEntries.map((entry, index) => (
-                        <tr
-                          key={entry.id}
-                          className={[
-                            entry.isEdited ? 'edited-row' : '',
-                            entry.source === 'leave-request' ? 'vacation-report-row' : '',
-                            entry.holidayName ? 'holiday-report-row' : ''
-                          ].filter(Boolean).join(' ')}
-                        >
-                          <td className="date-cell">
-                            {entry.date}
-                            {entry.holidayName && (
-                              <span className="day-marker">Feiertag: {entry.holidayName}</span>
-                            )}
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              value={entry.projectName}
-                              onChange={e => handleFieldChange(index, 'projectName', e.target.value)}
-                              className="inline-edit"
-                              disabled={entry.isReadOnly}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="time"
-                              value={entry.clockIn}
-                              onChange={e => handleFieldChange(index, 'clockIn', e.target.value)}
-                              className="inline-edit time-input"
-                              disabled={entry.isReadOnly}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="time"
-                              value={entry.clockOut}
-                              onChange={e => handleFieldChange(index, 'clockOut', e.target.value)}
-                              className="inline-edit time-input"
-                              disabled={entry.isReadOnly}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              min="0"
-                              value={entry.pauseMinutes}
-                              onChange={e => handleFieldChange(index, 'pauseMinutes', e.target.value)}
-                              className="inline-edit pause-input"
-                              disabled={entry.isReadOnly}
-                            />
-                          </td>
-                          <td className="comment-cell">{entry.notes || '—'}</td>
-                          <td className="hours-cell">{entry.workHours}</td>
-                          <td className="no-print actions-cell">
-                            {entry.isEdited && (
-                              <button type="button" onClick={() => handleResetEntry(index)} className="reset-btn">
-                                Zurück
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {reportEntries.map((entry, index) => {
+                        const projectMovePending = isProjectMovePending(entry)
+                        const isSavingProjectMove = savingProjectMoveEntryIds.has(entry.id)
+                        const canMoveProject = entry.source === 'time-entry' && !!entry.originalEntry.clockOutTime
+                        const projectOptions = projects.some(project => project.id === entry.projectId)
+                          ? projects
+                          : [{ id: entry.projectId, name: entry.projectName } as Project, ...projects]
+                        return (
+                          <tr
+                            key={entry.id}
+                            className={[
+                              entry.isEdited ? 'edited-row' : '',
+                              entry.source === 'leave-request' ? 'vacation-report-row' : '',
+                              entry.holidayName ? 'holiday-report-row' : ''
+                            ].filter(Boolean).join(' ')}
+                          >
+                            <td className="date-cell">
+                              {entry.date}
+                              {entry.holidayName && (
+                                <span className="day-marker">Feiertag: {entry.holidayName}</span>
+                              )}
+                            </td>
+                            <td>
+                              {entry.source === 'time-entry' ? (
+                                <select
+                                  value={entry.projectId}
+                                  onChange={e => handleFieldChange(index, 'projectId', e.target.value)}
+                                  className="inline-edit project-inline-select"
+                                  disabled={!canMoveProject || isSavingProjectMove}
+                                  title={
+                                    canMoveProject
+                                      ? 'Projekt für diesen Stempelsatz ändern'
+                                      : 'Offene Stempelungen können erst nach dem Ausstempeln verschoben werden'
+                                  }
+                                >
+                                  {projectOptions.map(project => (
+                                    <option key={project.id} value={project.id}>
+                                      {project.name || `Projekt ${project.id}`}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={entry.projectName}
+                                  className="inline-edit"
+                                  disabled
+                                  readOnly
+                                />
+                              )}
+                            </td>
+                            <td>
+                              <input
+                                type="time"
+                                value={entry.clockIn}
+                                onChange={e => handleFieldChange(index, 'clockIn', e.target.value)}
+                                className="inline-edit time-input"
+                                disabled={entry.isReadOnly}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="time"
+                                value={entry.clockOut}
+                                onChange={e => handleFieldChange(index, 'clockOut', e.target.value)}
+                                className="inline-edit time-input"
+                                disabled={entry.isReadOnly}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                value={entry.pauseMinutes}
+                                onChange={e => handleFieldChange(index, 'pauseMinutes', e.target.value)}
+                                className="inline-edit pause-input"
+                                disabled={entry.isReadOnly}
+                              />
+                            </td>
+                            <td className="comment-cell">{entry.notes || '—'}</td>
+                            <td className="hours-cell">{entry.workHours}</td>
+                            <td className="no-print actions-cell actions-cell-wide">
+                              {projectMovePending && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveEntryProjectMove(index)}
+                                  className="save-project-btn"
+                                  disabled={isSavingProjectMove}
+                                >
+                                  {isSavingProjectMove ? 'Speichert…' : 'Projekt speichern'}
+                                </button>
+                              )}
+                              {entry.isEdited && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResetEntry(index)}
+                                  className="reset-btn"
+                                  disabled={isSavingProjectMove}
+                                >
+                                  Zurück
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="total-row">
