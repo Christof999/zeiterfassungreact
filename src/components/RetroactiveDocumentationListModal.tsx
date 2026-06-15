@@ -129,45 +129,43 @@ const RetroactiveDocumentationListModal: React.FC<RetroactiveDocumentationListMo
           </div>
           <div className="modal-body">
             <p className="form-hint retro-doc-list-intro">
-              Wählen Sie einen abgeschlossenen Zeiteintrag, um die Dokumentation (wie beim Ausstempeln mit
-              Dokumentation) nachzutragen.
+              Wählen Sie direkt ein Projekt für einen neuen Bericht oder nutzen Sie unten einen
+              abgeschlossenen Zeiteintrag, um dessen Dokumentation zu ergänzen.
             </p>
 
-            {currentTimeEntry && (
-              <div className="retro-doc-project-card">
-                <h4>Bericht auf anderes Projekt schreiben</h4>
-                <p className="form-hint">
-                  Wenn Sie gerade eingestempelt sind, können Sie hier trotzdem einen Bericht für eine andere
-                  Baustelle erfassen. Der Nachtrag erzeugt keine zusätzliche Arbeitszeit.
-                </p>
-                <div className="form-group">
-                  <label htmlFor="retro-doc-project-select">Projekt auswählen</label>
-                  <select
-                    id="retro-doc-project-select"
-                    value={selectedProjectId}
-                    onChange={(e) => setSelectedProjectId(e.target.value)}
-                    disabled={activeProjects.length === 0}
-                  >
-                    <option value="" disabled>
-                      Bitte wählen
-                    </option>
-                    {activeProjects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name || project.id}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  className="btn primary-btn"
-                  onClick={openProjectDocumentation}
-                  disabled={!selectedProjectId || activeProjects.length === 0}
+            <div className="retro-doc-project-card">
+              <h4>Bericht direkt auf Projekt schreiben</h4>
+              <p className="form-hint">
+                Der Nachtrag wird im ausgewählten Projekt gespeichert, auch wenn Sie dort nicht
+                eingestempelt waren. Dabei entsteht keine zusätzliche Arbeitszeit.
+              </p>
+              <div className="form-group">
+                <label htmlFor="retro-doc-project-select">Projekt auswählen</label>
+                <select
+                  id="retro-doc-project-select"
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
+                  disabled={activeProjects.length === 0}
                 >
-                  Bericht für Projekt erfassen
-                </button>
+                  <option value="" disabled>
+                    Bitte wählen
+                  </option>
+                  {activeProjects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name || project.id}
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
+              <button
+                type="button"
+                className="btn primary-btn"
+                onClick={openProjectDocumentation}
+                disabled={!selectedProjectId || activeProjects.length === 0}
+              >
+                Bericht für Projekt erfassen
+              </button>
+            </div>
 
             {isLoading ? (
               <p className="retro-doc-list-loading">Lade Einträge…</p>
@@ -207,12 +205,12 @@ const RetroactiveDocumentationListModal: React.FC<RetroactiveDocumentationListMo
         />
       )}
 
-      {currentTimeEntry && projectDocumentationTarget && (
+      {projectDocumentationTarget && (
         <AppendDocumentationModal
-          timeEntry={currentTimeEntry}
           mode="project-documentation"
           targetProject={projectDocumentationTarget}
           addedBy={employee}
+          targetEmployee={employee}
           onClose={() => setProjectDocumentationTarget(null)}
           onSaved={() => {
             onDocumentationSaved()

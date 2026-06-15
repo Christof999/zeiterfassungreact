@@ -14,12 +14,13 @@ import '../styles/Modal.css'
 import '../styles/RetroactiveDocumentationModal.css'
 
 interface AppendDocumentationModalProps {
-  timeEntry: TimeEntry
+  timeEntry?: TimeEntry
   onClose: () => void
   onSaved: () => void
   mode?: 'append' | 'project-documentation'
   targetProject?: Project
   addedBy?: Employee
+  targetEmployee?: Employee
 }
 
 type VehicleBookingRow = {
@@ -60,11 +61,12 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
   onSaved,
   mode = 'append',
   targetProject,
-  addedBy
+  addedBy,
+  targetEmployee
 }) => {
   const isProjectDocumentationMode = mode === 'project-documentation'
   const [notes, setNotes] = useState(() =>
-    isProjectDocumentationMode ? '' : (timeEntry.notes || '').trim()
+    isProjectDocumentationMode ? '' : (timeEntry?.notes || '').trim()
   )
   const [sitePhotoItems, setSitePhotoItems] = useState<PhotoUploadItem[]>([])
   const [documentPhotoItems, setDocumentPhotoItems] = useState<PhotoUploadItem[]>([])
@@ -75,13 +77,16 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [vehicleRows, setVehicleRows] = useState<VehicleBookingRow[]>(() => [createVehicleBookingRow()])
 
-  const targetProjectId = isProjectDocumentationMode ? targetProject?.id : timeEntry.projectId
+  const targetProjectId = isProjectDocumentationMode ? targetProject?.id : timeEntry?.projectId
+  const targetEmployeeId = isProjectDocumentationMode
+    ? targetEmployee?.id || addedBy?.id
+    : timeEntry?.employeeId
   const targetProjectName = isProjectDocumentationMode
     ? targetProject?.name || targetProject?.id || 'ausgewähltes Projekt'
     : undefined
   const bookingDateForEntry = isProjectDocumentationMode
     ? formatDateForInputLocal(new Date())
-    : clockInToLocalDateString(timeEntry.clockInTime)
+    : clockInToLocalDateString(timeEntry?.clockInTime)
 
   useEffect(() => {
     const loadVehicles = async () => {
@@ -142,10 +147,18 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
       toast.error('Ihre Benutzer-ID fehlt.')
       return
     }
+    if (isProjectDocumentationMode && !targetEmployeeId) {
+      toast.error('Mitarbeiter für den Bericht nicht gefunden.')
+      return
+    }
+    if (!isProjectDocumentationMode && !timeEntry) {
+      toast.error('Zeiteintrag nicht gefunden.')
+      return
+    }
 
     const notesChanged = isProjectDocumentationMode
       ? notes.trim() !== ''
-      : notes.trim() !== (timeEntry.notes || '').trim()
+      : notes.trim() !== (timeEntry!.notes || '').trim()
     const hasNewPhotos = sitePhotoItems.length > 0 || documentPhotoItems.length > 0
     if (!notesChanged && !hasNewPhotos && bookingsToSave.length === 0) {
       toast.error('Bitte ergänzen Sie Notizen, Fotos/Dokumente oder Fahrzeugbuchungen.')
@@ -162,14 +175,14 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
 
     try {
       let step = 0
-      let documentationEntry = timeEntry
-      let documentationProjectId = timeEntry.projectId
+      let documentationEntry: TimeEntry
+      let documentationProjectId: string
 
       if (isProjectDocumentationMode) {
         setProgressMessage('Projektbericht wird angelegt…')
         const addedByDisplayName = getEmployeeDisplayName(addedBy!)
         documentationEntry = await DataService.addProjectDocumentationEntry({
-          targetEmployeeId: timeEntry.employeeId,
+          targetEmployeeId: targetEmployeeId!,
           projectId: targetProjectId!,
           occurredAt: new Date(),
           notes: notes.trim() || undefined,
@@ -179,6 +192,9 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
         documentationProjectId = targetProjectId!
         step += 1
         setProgressStep(step)
+      } else {
+        documentationEntry = timeEntry!
+        documentationProjectId = timeEntry!.projectId
       }
 
       if (bookingsToSave.length > 0) {
