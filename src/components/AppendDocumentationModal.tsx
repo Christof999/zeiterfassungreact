@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { DataService } from '../services/dataService'
-import type { TimeEntry, Vehicle, FileUpload } from '../types'
+import type { TimeEntry, Vehicle, FileUpload, Project, Employee } from '../types'
 import PhotoUpload, { type PhotoUploadItem } from './PhotoUpload'
 import SaveProgressOverlay from './SaveProgressOverlay'
 import { VehicleBookingFormFields } from './VehicleBookingFormFields'
@@ -9,13 +9,18 @@ import { withTimeout } from '../utils/withTimeout'
 import { toFileUploadRef } from '../utils/fileUploadRef'
 import { toast } from './ToastContainer'
 import { formatDateForInputLocal } from '../utils/dateUtils'
+import { getEmployeeDisplayName } from '../utils/employeeDisplayName'
 import '../styles/Modal.css'
 import '../styles/RetroactiveDocumentationModal.css'
 
 interface AppendDocumentationModalProps {
-  timeEntry: TimeEntry
+  timeEntry?: TimeEntry
   onClose: () => void
   onSaved: () => void
+  mode?: 'append' | 'project-documentation'
+  targetProject?: Project
+  addedBy?: Employee
+  targetEmployee?: Employee
 }
 
 type VehicleBookingRow = {
@@ -53,9 +58,16 @@ function clockInToLocalDateString(clockIn: TimeEntry['clockInTime']): string {
 const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
   timeEntry,
   onClose,
-  onSaved
+  onSaved,
+  mode = 'append',
+  targetProject,
+  addedBy,
+  targetEmployee
 }) => {
-  const [notes, setNotes] = useState(() => (timeEntry.notes || '').trim())
+  const isProjectDocumentationMode = mode === 'project-documentation'
+  const [notes, setNotes] = useState(() =>
+    isProjectDocumentationMode ? '' : (timeEntry?.notes || '').trim()
+  )
   const [sitePhotoItems, setSitePhotoItems] = useState<PhotoUploadItem[]>([])
   const [documentPhotoItems, setDocumentPhotoItems] = useState<PhotoUploadItem[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -65,7 +77,16 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [vehicleRows, setVehicleRows] = useState<VehicleBookingRow[]>(() => [createVehicleBookingRow()])
 
-  const bookingDateForEntry = clockInToLocalDateString(timeEntry.clockInTime)
+  const targetProjectId = isProjectDocumentationMode ? targetProject?.id : timeEntry?.projectId
+  const targetEmployeeId = isProjectDocumentationMode
+    ? targetEmployee?.id || addedBy?.id
+    : timeEntry?.employeeId
+  const targetProjectName = isProjectDocumentationMode
+    ? targetProject?.name || targetProject?.id || 'ausgewähltes Projekt'
+    : undefined
+  const bookingDateForEntry = isProjectDocumentationMode
+    ? formatDateForInputLocal(new Date())
+    : clockInToLocalDateString(timeEntry?.clockInTime)
 
   useEffect(() => {
     const loadVehicles = async () => {
@@ -118,7 +139,26 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
       }
     }
 
-    const notesChanged = notes.trim() !== (timeEntry.notes || '').trim()
+    if (isProjectDocumentationMode && !targetProjectId) {
+      toast.error('Bitte wählen Sie ein Projekt.')
+      return
+    }
+    if (isProjectDocumentationMode && !addedBy?.id) {
+      toast.error('Ihre Benutzer-ID fehlt.')
+      return
+    }
+    if (isProjectDocumentationMode && !targetEmployeeId) {
+      toast.error('Mitarbeiter für den Bericht nicht gefunden.')
+      return
+    }
+    if (!isProjectDocumentationMode && !timeEntry) {
+      toast.error('Zeiteintrag nicht gefunden.')
+      return
+    }
+
+    const notesChanged = isProjectDocumentationMode
+      ? notes.trim() !== ''
+      : notes.trim() !== (timeEntry!.notes || '').trim()
     const hasNewPhotos = sitePhotoItems.length > 0 || documentPhotoItems.length > 0
     if (!notesChanged && !hasNewPhotos && bookingsToSave.length === 0) {
       toast.error('Bitte ergänzen Sie Notizen, Fotos/Dokumente oder Fahrzeugbuchungen.')
@@ -135,21 +175,42 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
 
     try {
       let step = 0
+      let documentationEntry: TimeEntry
+      let documentationProjectId: string
+
+      if (isProjectDocumentationMode) {
+        setProgressMessage('Projektbericht wird angelegt…')
+        const addedByDisplayName = getEmployeeDisplayName(addedBy!)
+        documentationEntry = await DataService.addProjectDocumentationEntry({
+          targetEmployeeId: targetEmployeeId!,
+          projectId: targetProjectId!,
+          occurredAt: new Date(),
+          notes: notes.trim() || undefined,
+          addedByEmployeeId: addedBy!.id!,
+          addedByDisplayName
+        })
+        documentationProjectId = targetProjectId!
+        step += 1
+        setProgressStep(step)
+      } else {
+        documentationEntry = timeEntry!
+        documentationProjectId = timeEntry!.projectId
+      }
 
       if (bookingsToSave.length > 0) {
         const currentUser = await DataService.getCurrentUser()
         if (!currentUser) {
           throw new Error('Benutzer nicht gefunden.')
         }
-        for (const row of bookingsToSave) {
-          setProgressMessage(`Fahrzeugbuchung ${step + 1} von ${bookingsToSave.length}`)
+        for (const [index, row] of bookingsToSave.entries()) {
+          setProgressMessage(`Fahrzeugbuchung ${index + 1} von ${bookingsToSave.length}`)
           const selectedVehicle = vehicles.find((v) => String(v.id) === String(row.vehicleId))
           await DataService.addVehicleUsage({
             vehicleId: row.vehicleId,
             vehicleName: selectedVehicle?.name,
             employeeId: currentUser.id,
-            projectId: timeEntry.projectId,
-            timeEntryId: timeEntry.id,
+            projectId: documentationProjectId,
+            timeEntryId: documentationEntry.id,
             date: bookingDateForEntry,
             hours: row.hours,
             hoursUsed: row.hours,
@@ -177,10 +238,10 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
               label: 'Dokument'
             }
           ],
-          projectId: timeEntry.projectId,
-          employeeId: timeEntry.employeeId,
-          timeEntryId: timeEntry.id,
-          notes: notes.trim(),
+          projectId: documentationProjectId,
+          employeeId: documentationEntry.employeeId,
+          timeEntryId: documentationEntry.id,
+          notes: isProjectDocumentationMode ? undefined : notes.trim(),
           initialStep: step,
           onProgress: ({ message, step: s }) => {
             setProgressMessage(message)
@@ -188,10 +249,13 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
           }
         })
 
-      const mergedSiteUploads = mergeIdList(timeEntry.sitePhotoUploads, siteUploads.map((u) => u.id))
-      const mergedDocUploads = mergeIdList(timeEntry.documentPhotoUploads, documentUploads.map((u) => u.id))
-      const mergedSitePhotos = mergeFileList(timeEntry.sitePhotos, siteUploads)
-      const mergedDocuments = mergeFileList(timeEntry.documents, documentUploads)
+      const mergedSiteUploads = mergeIdList(documentationEntry.sitePhotoUploads, siteUploads.map((u) => u.id))
+      const mergedDocUploads = mergeIdList(documentationEntry.documentPhotoUploads, documentUploads.map((u) => u.id))
+      const mergedSitePhotos = mergeFileList(documentationEntry.sitePhotos, siteUploads)
+      const mergedDocuments = mergeFileList(documentationEntry.documents, documentUploads)
+      const notesForUpdate = isProjectDocumentationMode
+        ? (documentationEntry.notes || notes.trim()).trim()
+        : notes.trim()
 
       // Online-Verknüpfung nur, wenn etwas online gespeichert werden muss — sonst übernimmt der
       // Hintergrund-Upload Notizen + Fotos (verhindert Hängen bei komplett fehlendem Netz).
@@ -200,17 +264,17 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
         setProgressMessage('Zeiteintrag wird aktualisiert…')
         try {
           await withTimeout(
-            DataService.updateTimeEntry(timeEntry.id, {
-              notes: notes.trim(),
+            DataService.updateTimeEntry(documentationEntry.id, {
+              notes: notesForUpdate,
               sitePhotoUploads: mergedSiteUploads,
               documentPhotoUploads: mergedDocUploads,
               sitePhotos: mergedSitePhotos as TimeEntry['sitePhotos'],
               documents: mergedDocuments as TimeEntry['documents'],
               hasDocumentation:
-                !!timeEntry.hasDocumentation ||
+                !!documentationEntry.hasDocumentation ||
                 mergedSiteUploads.length > 0 ||
                 mergedDocUploads.length > 0 ||
-                notes.trim() !== ''
+                notesForUpdate !== ''
             }),
             30_000,
             'Speichern hat zu lange gedauert — vermutlich schlechtes Netz.'
@@ -251,7 +315,11 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
     >
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Bericht / Dokumentation nachtragen</h3>
+          <h3>
+            {isProjectDocumentationMode
+              ? 'Projektbericht nachtragen'
+              : 'Bericht / Dokumentation nachtragen'}
+          </h3>
           <button
             type="button"
             className="close-modal-btn"
@@ -263,8 +331,18 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
         </div>
         <div className="modal-body">
           <p className="form-hint" style={{ marginTop: 0 }}>
-            Gleicher Umfang wie beim Ausstempeln mit Dokumentation (Notizen, Baustellenfotos, Belege,
-            optionale Fahrzeugzeit für den Tag des Eintrags: {bookingDateForEntry}).
+            {isProjectDocumentationMode ? (
+              <>
+                Neuer Bericht für <strong>{targetProjectName}</strong>. Der Nachtrag wird ohne zusätzliche
+                Arbeitszeit im ausgewählten Projekt gespeichert; optionale Fahrzeugzeit wird für {bookingDateForEntry}
+                gebucht.
+              </>
+            ) : (
+              <>
+                Gleicher Umfang wie beim Ausstempeln mit Dokumentation (Notizen, Baustellenfotos, Belege,
+                optionale Fahrzeugzeit für den Tag des Eintrags: {bookingDateForEntry}).
+              </>
+            )}
           </p>
           <form onSubmit={handleSubmit}>
             <div className="form-group">

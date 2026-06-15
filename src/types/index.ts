@@ -72,6 +72,8 @@ export interface TimeEntry {
   }>
   /** Nachtrag durch befugte Kollegen (nicht Admin) */
   manualTimeEntry?: boolean
+  /** Reiner Berichtsnachtrag ohne Arbeitszeit, damit Projektdokumentation nicht den aktiven Stempelstatus verändert. */
+  documentationOnlyEntry?: boolean
   manualTimeEntryAddedByEmployeeId?: string
   manualTimeEntryAddedByDisplayName?: string
   manualTimeEntryCreatedAt?: any

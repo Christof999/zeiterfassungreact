@@ -703,8 +703,10 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       const pauseMs = entry.pauseTotalTime || 0
       const workMs = Math.max(0, diffMs - pauseMs)
       const hours = workMs / (1000 * 60 * 60)
-      const prev = bucket.empHours.get(entry.employeeId) || 0
-      bucket.empHours.set(entry.employeeId, prev + hours)
+      if (!entry.documentationOnlyEntry) {
+        const prev = bucket.empHours.get(entry.employeeId) || 0
+        bucket.empHours.set(entry.employeeId, prev + hours)
+      }
     }
 
     for (const f of [...projectPhotos, ...projectDocuments]) {
@@ -938,6 +940,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       const employeeMap = new Map<string, { hours: number; rate: number; name: string }>()
       
       timeEntries.forEach(entry => {
+        if (entry.documentationOnlyEntry) return
         if (!entry.clockOutTime) return // Nur abgeschlossene Einträge
         
         const clockIn = convertToDate(entry.clockInTime)
@@ -2033,12 +2036,15 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
                                   const cout = formatTimeForInput(convertToDate(entry.clockOutTime))
                                   const note = (entry.notes || '').trim()
                                   const live = entry.liveDocumentation || []
+                                  const timeLabel = entry.documentationOnlyEntry
+                                    ? 'Berichtsnachtrag'
+                                    : `${cin}–${cout}`
                                   return (
                                     <li key={entry.id} className="project-entry-text-item">
                                       <div className="pet-head">
                                         <strong>{empName}</strong>
                                         <span className="muted-small">
-                                          {cin}–{cout}
+                                          {timeLabel}
                                         </span>
                                       </div>
                                       {note && <p className="pet-notes">{note}</p>}

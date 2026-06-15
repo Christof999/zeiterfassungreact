@@ -347,6 +347,7 @@ const TimeTracking: React.FC = () => {
         {showRetroDocListModal && currentUser && (
           <RetroactiveDocumentationListModal
             employee={currentUser}
+            currentTimeEntry={currentTimeEntry}
             onClose={() => setShowRetroDocListModal(false)}
             onDocumentationSaved={() => setActivitiesRefreshKey((k) => k + 1)}
           />

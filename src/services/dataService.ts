@@ -763,6 +763,71 @@ class DataServiceClass {
     }
   }
 
+  /**
+   * Reinen Projektbericht ohne Arbeitszeit anlegen.
+   * Dient als Dokumentationsanker, wenn ein berechtigter Mitarbeiter gerade in einem
+   * anderen Projekt eingestempelt ist und trotzdem Bericht/Fotos zu dieser Baustelle erfasst.
+   */
+  async addProjectDocumentationEntry(params: {
+    targetEmployeeId: string
+    projectId: string
+    occurredAt: Date
+    notes?: string
+    addedByEmployeeId: string
+    addedByDisplayName: string
+  }): Promise<TimeEntry> {
+    await this.authReadyPromise
+    try {
+      if (!params.targetEmployeeId || !params.projectId) {
+        throw new Error('Mitarbeiter und Projekt sind erforderlich')
+      }
+      if (!params.addedByEmployeeId) {
+        throw new Error('Erfasser ist erforderlich')
+      }
+      const occurredAt = params.occurredAt
+      if (!(occurredAt instanceof Date) || Number.isNaN(occurredAt.getTime())) {
+        throw new Error('Ungültiges Berichtsdatum')
+      }
+      if (occurredAt.getTime() > Date.now()) {
+        throw new Error('Berichtsdatum darf nicht in der Zukunft liegen')
+      }
+
+      const timeEntriesRef = collection(db, 'timeEntries')
+      const timeEntryRef = doc(timeEntriesRef)
+      const occurredAtTs = Timestamp.fromDate(occurredAt)
+      const noteBase = params.notes?.trim() ?? ''
+      const auditNote = `Berichtsnachtrag durch ${params.addedByDisplayName}`
+      const notes = noteBase ? `${noteBase} | ${auditNote}` : auditNote
+
+      const rawPayload: Record<string, unknown> = {
+        entryId: timeEntryRef.id,
+        employeeId: params.targetEmployeeId,
+        projectId: params.projectId,
+        clockInTime: occurredAtTs,
+        clockOutTime: occurredAtTs,
+        pauseTotalTime: 0,
+        notes,
+        hasDocumentation: true,
+        manualTimeEntry: true,
+        documentationOnlyEntry: true,
+        manualTimeEntryAddedByEmployeeId: params.addedByEmployeeId,
+        manualTimeEntryAddedByDisplayName: params.addedByDisplayName,
+        manualTimeEntryCreatedAt: serverTimestamp()
+      }
+
+      const payload = Object.fromEntries(
+        Object.entries(rawPayload).filter(([, value]) => value !== undefined)
+      )
+
+      await setDoc(timeEntryRef, payload)
+      const snap = await getDoc(timeEntryRef)
+      return sanitizeTimeEntryForRead({ id: timeEntryRef.id, ...snap.data() } as TimeEntry)
+    } catch (error) {
+      console.error('Fehler beim Anlegen des Projekt-Berichtsnachtrags:', error)
+      throw error
+    }
+  }
+
   async clockOutEmployee(
     timeEntryId: string,
     notes: string,
