@@ -8,6 +8,7 @@ import '../styles/RetroactiveDocumentationModal.css'
 
 interface RetroactiveDocumentationListModalProps {
   employee: Employee
+  currentTimeEntry?: TimeEntry | null
   onClose: () => void
   onDocumentationSaved: () => void
 }
@@ -29,13 +30,17 @@ function toDate(value: TimeEntry['clockInTime']): Date | null {
 
 const RetroactiveDocumentationListModal: React.FC<RetroactiveDocumentationListModalProps> = ({
   employee,
+  currentTimeEntry,
   onClose,
   onDocumentationSaved
 }) => {
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [projects, setProjects] = useState<Project[]>([])
+  const [activeProjects, setActiveProjects] = useState<Project[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedEntry, setSelectedEntry] = useState<TimeEntry | null>(null)
+  const [selectedProjectId, setSelectedProjectId] = useState('')
+  const [projectDocumentationTarget, setProjectDocumentationTarget] = useState<Project | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -45,7 +50,24 @@ const RetroactiveDocumentationListModal: React.FC<RetroactiveDocumentationListMo
           DataService.getTimeEntriesByEmployeeId(employee.id!),
           DataService.getAllProjects()
         ])
+        const active = allProjects
+          .filter((project) => {
+            const normalizedStatus = (project.status || '').toLowerCase()
+            const isActiveStatus =
+              !project.status || normalizedStatus === 'active' || normalizedStatus === 'aktiv'
+            return project.id && project.isActive !== false && isActiveStatus
+          })
+          .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'))
+
         setProjects(allProjects)
+        setActiveProjects(active)
+        setSelectedProjectId((current) => {
+          if (current && active.some((project) => project.id === current)) return current
+          if (currentTimeEntry?.projectId && active.some((project) => project.id === currentTimeEntry.projectId)) {
+            return currentTimeEntry.projectId
+          }
+          return active[0]?.id || ''
+        })
 
         const completed = allEntries.filter((e) => {
           if (e.isVacationDay) return false
@@ -70,7 +92,7 @@ const RetroactiveDocumentationListModal: React.FC<RetroactiveDocumentationListMo
       }
     }
     load()
-  }, [employee.id])
+  }, [employee.id, currentTimeEntry?.projectId])
 
   const projectName = (projectId: string): string => {
     const p = projects.find((x) => x.id === projectId)
@@ -89,6 +111,12 @@ const RetroactiveDocumentationListModal: React.FC<RetroactiveDocumentationListMo
       : '—'
   }
 
+  const openProjectDocumentation = () => {
+    const project = activeProjects.find((p) => p.id === selectedProjectId)
+    if (!project) return
+    setProjectDocumentationTarget(project)
+  }
+
   return (
     <>
       <div className="modal-overlay" onClick={onClose}>
@@ -104,6 +132,42 @@ const RetroactiveDocumentationListModal: React.FC<RetroactiveDocumentationListMo
               Wählen Sie einen abgeschlossenen Zeiteintrag, um die Dokumentation (wie beim Ausstempeln mit
               Dokumentation) nachzutragen.
             </p>
+
+            {currentTimeEntry && (
+              <div className="retro-doc-project-card">
+                <h4>Bericht auf anderes Projekt schreiben</h4>
+                <p className="form-hint">
+                  Wenn Sie gerade eingestempelt sind, können Sie hier trotzdem einen Bericht für eine andere
+                  Baustelle erfassen. Der Nachtrag erzeugt keine zusätzliche Arbeitszeit.
+                </p>
+                <div className="form-group">
+                  <label htmlFor="retro-doc-project-select">Projekt auswählen</label>
+                  <select
+                    id="retro-doc-project-select"
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    disabled={activeProjects.length === 0}
+                  >
+                    <option value="" disabled>
+                      Bitte wählen
+                    </option>
+                    {activeProjects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name || project.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  className="btn primary-btn"
+                  onClick={openProjectDocumentation}
+                  disabled={!selectedProjectId || activeProjects.length === 0}
+                >
+                  Bericht für Projekt erfassen
+                </button>
+              </div>
+            )}
 
             {isLoading ? (
               <p className="retro-doc-list-loading">Lade Einträge…</p>
@@ -139,6 +203,20 @@ const RetroactiveDocumentationListModal: React.FC<RetroactiveDocumentationListMo
           onSaved={() => {
             onDocumentationSaved()
             setSelectedEntry(null)
+          }}
+        />
+      )}
+
+      {currentTimeEntry && projectDocumentationTarget && (
+        <AppendDocumentationModal
+          timeEntry={currentTimeEntry}
+          mode="project-documentation"
+          targetProject={projectDocumentationTarget}
+          addedBy={employee}
+          onClose={() => setProjectDocumentationTarget(null)}
+          onSaved={() => {
+            onDocumentationSaved()
+            setProjectDocumentationTarget(null)
           }}
         />
       )}
