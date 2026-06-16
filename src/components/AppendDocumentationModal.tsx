@@ -155,6 +155,18 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
       toast.error('Zeiteintrag nicht gefunden.')
       return
     }
+    // Ein neuer Projektbericht muss serverseitig angelegt werden (kein Offline-Cache).
+    // Bei fehlendem Netz sofort melden, statt den Speicher-Overlay hängen zu lassen.
+    if (
+      isProjectDocumentationMode &&
+      typeof navigator !== 'undefined' &&
+      navigator.onLine === false
+    ) {
+      toast.error(
+        'Kein Internet — der Projektbericht kann offline nicht angelegt werden. Ihre Eingaben bleiben erhalten, bitte bei Netz erneut speichern.'
+      )
+      return
+    }
 
     const notesChanged = isProjectDocumentationMode
       ? notes.trim() !== ''
@@ -181,14 +193,20 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
       if (isProjectDocumentationMode) {
         setProgressMessage('Projektbericht wird angelegt…')
         const addedByDisplayName = getEmployeeDisplayName(addedBy!)
-        documentationEntry = await DataService.addProjectDocumentationEntry({
-          targetEmployeeId: targetEmployeeId!,
-          projectId: targetProjectId!,
-          occurredAt: new Date(),
-          notes: notes.trim() || undefined,
-          addedByEmployeeId: addedBy!.id!,
-          addedByDisplayName
-        })
+        // Begrenzen, falls das Netz zwar da ist, aber stockt — sonst bliebe der
+        // Overlay bei langsamem Baustellen-Netz unbegrenzt stehen.
+        documentationEntry = await withTimeout(
+          DataService.addProjectDocumentationEntry({
+            targetEmployeeId: targetEmployeeId!,
+            projectId: targetProjectId!,
+            occurredAt: new Date(),
+            notes: notes.trim() || undefined,
+            addedByEmployeeId: addedBy!.id!,
+            addedByDisplayName
+          }),
+          30_000,
+          'Bericht konnte nicht gespeichert werden — vermutlich schlechtes Netz. Ihre Eingaben bleiben erhalten, bitte erneut versuchen.'
+        )
         documentationProjectId = targetProjectId!
         step += 1
         setProgressStep(step)
