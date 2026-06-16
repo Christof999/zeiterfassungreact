@@ -259,8 +259,14 @@ const AppendDocumentationModal: React.FC<AppendDocumentationModalProps> = ({
 
       // Online-Verknüpfung nur, wenn etwas online gespeichert werden muss — sonst übernimmt der
       // Hintergrund-Upload Notizen + Fotos (verhindert Hängen bei komplett fehlendem Netz).
+      // Im Projekt-Berichts-Modus sind Notizen + hasDocumentation bereits beim Anlegen
+      // gespeichert, daher hier nur verknüpfen, wenn es tatsächlich Online-Fotos gibt
+      // (spart bei langsamem Netz einen weiteren Server-Roundtrip).
       const hasOnlineUploads = siteUploads.length > 0 || documentUploads.length > 0
-      if (hasOnlineUploads || deferredPhotos === 0) {
+      const needsServerLink = isProjectDocumentationMode
+        ? hasOnlineUploads
+        : hasOnlineUploads || deferredPhotos === 0
+      if (needsServerLink) {
         setProgressMessage('Zeiteintrag wird aktualisiert…')
         try {
           await withTimeout(

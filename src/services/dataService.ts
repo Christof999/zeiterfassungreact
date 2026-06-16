@@ -820,8 +820,14 @@ class DataServiceClass {
       )
 
       await setDoc(timeEntryRef, payload)
-      const snap = await getDoc(timeEntryRef)
-      return sanitizeTimeEntryForRead({ id: timeEntryRef.id, ...snap.data() } as TimeEntry)
+      // Den geschriebenen Eintrag lokal zusammenbauen, statt ihn erneut vom Server
+      // zu lesen. Das spart bei langsamem Baustellen-Netz einen kompletten Roundtrip.
+      const createdEntry = {
+        ...payload,
+        id: timeEntryRef.id,
+        manualTimeEntryCreatedAt: Timestamp.now()
+      } as unknown as TimeEntry
+      return sanitizeTimeEntryForRead(createdEntry)
     } catch (error) {
       console.error('Fehler beim Anlegen des Projekt-Berichtsnachtrags:', error)
       throw error
