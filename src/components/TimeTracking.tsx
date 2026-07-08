@@ -8,6 +8,7 @@ import ManualTimeEntryModal from './ManualTimeEntryModal'
 import RetroactiveDocumentationListModal from './RetroactiveDocumentationListModal'
 import RecentActivities from './RecentActivities'
 import { canAddManualTimeEntries } from '../constants/manualTimeEntry'
+import { getDelegateUsernames } from '../constants/stampForDelegates'
 import NavigationMenu from './NavigationMenu'
 import { toast } from './ToastContainer'
 import ThemeToggle from './ThemeToggle'
@@ -16,6 +17,12 @@ import '../styles/TimeTracking.css'
 
 const TimeTracking: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<Employee | null>(null)
+  // Person, für die aktuell gestempelt wird (Standard: der eingeloggte Nutzer selbst).
+  // Vertreter (z. B. Michael) können über den Personen-Umschalter auf einen
+  // Kollegen (z. B. Martin) wechseln – der restliche Bildschirm bleibt gleich.
+  const [activeEmployee, setActiveEmployee] = useState<Employee | null>(null)
+  const [delegates, setDelegates] = useState<Employee[]>([])
+  const [isSwitchingEmployee, setIsSwitchingEmployee] = useState(false)
   const [currentTimeEntry, setCurrentTimeEntry] = useState<TimeEntry | null>(null)
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
   const [clockInTime, setClockInTime] = useState<Date | null>(null)
@@ -28,6 +35,10 @@ const TimeTracking: React.FC = () => {
   const [isClockingIn, setIsClockingIn] = useState(false)
   const navigate = useNavigate()
 
+  // Wen bediene ich gerade? Für alle Stempel-/Anzeige-Aktionen maßgeblich.
+  const viewedEmployee = activeEmployee ?? currentUser
+  const isStampingForSelf = !!currentUser && viewedEmployee?.id === currentUser.id
+
   const canManualTimeEntry = canAddManualTimeEntries(currentUser?.username)
 
   useEffect(() => {
@@ -39,12 +50,26 @@ const TimeTracking: React.FC = () => {
       }
 
       setCurrentUser(user)
+      setActiveEmployee(user)
 
-      const [timeEntry, activeProjects] = await Promise.all([
+      const delegateUsernames = getDelegateUsernames(user.username)
+
+      const [timeEntry, activeProjects, allActive] = await Promise.all([
         DataService.getCurrentTimeEntry(user.id),
-        DataService.getActiveProjects()
+        DataService.getActiveProjects(),
+        delegateUsernames.length > 0
+          ? DataService.getAllActiveEmployees()
+          : Promise.resolve([] as Employee[])
       ])
       setClockInProjects(activeProjects)
+
+      if (delegateUsernames.length > 0) {
+        const wanted = new Set(delegateUsernames.map((u) => u.toLowerCase()))
+        const resolved = allActive.filter(
+          (e) => e.username && wanted.has(e.username.toLowerCase()) && e.id !== user.id
+        )
+        setDelegates(resolved)
+      }
 
       if (timeEntry) {
         applyActiveTimeEntry(timeEntry, activeProjects)
@@ -55,6 +80,25 @@ const TimeTracking: React.FC = () => {
 
     init()
   }, [navigate])
+
+  // Umschalten auf eine andere Person: deren aktiven Eintrag/Projekt/Timer laden.
+  const handleSelectEmployee = async (employee: Employee) => {
+    if (isSwitchingEmployee || !employee.id || employee.id === viewedEmployee?.id) return
+    setIsSwitchingEmployee(true)
+    resetClockOutState()
+    setActiveEmployee(employee)
+    try {
+      const entry = await DataService.getCurrentTimeEntry(employee.id)
+      if (entry) {
+        applyActiveTimeEntry(entry)
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unbekannter Fehler'
+      toast.error('Konnte Status nicht laden: ' + msg)
+    } finally {
+      setIsSwitchingEmployee(false)
+    }
+  }
 
   const applyActiveTimeEntry = (timeEntry: TimeEntry, projectsList: Project[] = clockInProjects) => {
     setCurrentTimeEntry(timeEntry)
@@ -91,7 +135,7 @@ const TimeTracking: React.FC = () => {
   }, [clockInTime])
 
   const handleClockIn = async (projectId: string) => {
-    if (isClockingIn || !currentUser?.id) return
+    if (isClockingIn || !viewedEmployee?.id) return
 
     setIsClockingIn(true)
     try {
@@ -99,18 +143,22 @@ const TimeTracking: React.FC = () => {
       const now = new Date()
 
       const created = await DataService.addTimeEntry({
-        employeeId: currentUser.id,
+        employeeId: viewedEmployee.id,
         projectId,
         clockInTime: now,
         clockInLocation: location,
         notes: ''
       })
 
-      const refreshed = await DataService.getCurrentTimeEntry(currentUser.id)
+      const refreshed = await DataService.getCurrentTimeEntry(viewedEmployee.id)
       applyActiveTimeEntry(refreshed ?? created)
 
       setActivitiesRefreshKey((k) => k + 1)
-      toast.success('Sie wurden erfolgreich eingestempelt!')
+      toast.success(
+        isStampingForSelf
+          ? 'Sie wurden erfolgreich eingestempelt!'
+          : `${getEmployeeDisplayName(viewedEmployee)} wurde eingestempelt`
+      )
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Unbekannter Fehler'
       toast.error('Fehler beim Einstempeln: ' + msg)
@@ -120,12 +168,12 @@ const TimeTracking: React.FC = () => {
   }
 
   const handleProjectSwitch = async (newProjectId: string) => {
-    if (!currentTimeEntry || !currentUser?.id) return
+    if (!currentTimeEntry || !viewedEmployee?.id) return
 
     try {
       const location = await getCurrentLocation()
       const timeEntry = await DataService.switchActiveProject(
-        currentUser.id,
+        viewedEmployee.id,
         currentTimeEntry.id,
         newProjectId,
         location
@@ -168,7 +216,11 @@ const TimeTracking: React.FC = () => {
       )
 
       resetClockOutState()
-      toast.success('Sie wurden erfolgreich ausgestempelt!')
+      toast.success(
+        isStampingForSelf
+          ? 'Sie wurden erfolgreich ausgestempelt!'
+          : `${getEmployeeDisplayName(viewedEmployee)} wurde ausgestempelt`
+      )
     } catch (error: any) {
       toast.error('Fehler beim Ausstempeln: ' + error.message)
     }
@@ -248,7 +300,32 @@ const TimeTracking: React.FC = () => {
         </div>
 
         <div className="time-tracking-workspace">
-          {canManualTimeEntry && !currentTimeEntry && (
+          {delegates.length > 0 && currentUser && (
+            <div className="employee-switcher" role="tablist" aria-label="Für wen stempeln?">
+              <span className="employee-switcher-label">Stempeln für:</span>
+              <div className="employee-switcher-tabs">
+                {[currentUser, ...delegates].map((emp) => {
+                  const isActive = viewedEmployee?.id === emp.id
+                  const isSelf = emp.id === currentUser.id
+                  return (
+                    <button
+                      key={emp.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      disabled={isSwitchingEmployee}
+                      className={`employee-switcher-tab${isActive ? ' is-active' : ''}`}
+                      onClick={() => handleSelectEmployee(emp)}
+                    >
+                      {isSelf ? `Ich · ${getEmployeeDisplayName(emp)}` : getEmployeeDisplayName(emp)}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {canManualTimeEntry && isStampingForSelf && !currentTimeEntry && (
             <div className="manual-time-entry-banner">
               <p className="manual-time-entry-banner-text">
                 Sie können vergessene Stempelzeiten für sich oder andere Mitarbeiter nachtragen sowie
@@ -300,7 +377,7 @@ const TimeTracking: React.FC = () => {
               onExtendedClockOutSuccess={resetClockOutState}
               onProjectSwitch={handleProjectSwitch}
               onUpdate={() => {
-                DataService.getCurrentTimeEntry(currentUser.id!).then(async (entry) => {
+                DataService.getCurrentTimeEntry(viewedEmployee!.id!).then(async (entry) => {
                   setCurrentTimeEntry(entry)
 
                   if (!entry) {
@@ -321,7 +398,7 @@ const TimeTracking: React.FC = () => {
             />
           )}
 
-          {canManualTimeEntry && currentTimeEntry && (
+          {canManualTimeEntry && isStampingForSelf && currentTimeEntry && (
             <div className="manual-time-entry-compact">
               <button
                 type="button"
@@ -334,7 +411,7 @@ const TimeTracking: React.FC = () => {
           )}
         </div>
 
-        <RecentActivities employeeId={currentUser.id!} refreshKey={activitiesRefreshKey} />
+        <RecentActivities employeeId={viewedEmployee!.id!} refreshKey={activitiesRefreshKey} />
 
         {showManualEntryModal && (
           <ManualTimeEntryModal

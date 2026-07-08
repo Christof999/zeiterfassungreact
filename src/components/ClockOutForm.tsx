@@ -53,10 +53,9 @@ const ClockOutForm: React.FC<ClockOutFormProps> = ({
 
   const loadVehicleBookings = async () => {
     try {
-      const [bookings, vehicles, user] = await Promise.all([
+      const [bookings, vehicles] = await Promise.all([
         DataService.getVehicleUsagesByProject(timeEntry.projectId),
-        DataService.getAllVehicles(),
-        DataService.getCurrentUser()
+        DataService.getAllVehicles()
       ])
 
       const formatDateToKey = (value: any): string => {
@@ -90,7 +89,8 @@ const ClockOutForm: React.FC<ClockOutFormProps> = ({
       const myBookings = bookings
         .filter((booking) => {
           const bookingDate = formatDateToKey(booking.date)
-          return booking.employeeId === user?.id && bookingDate === today
+          // Buchungen der Person dieses Eintrags (bei Vertretung z. B. Martin)
+          return booking.employeeId === timeEntry.employeeId && bookingDate === today
         })
         .map((booking) => ({
           ...booking,

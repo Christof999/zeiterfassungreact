@@ -39,14 +39,15 @@ const VehicleBookingModal: React.FC<VehicleBookingModalProps> = ({ timeEntry, on
 
     setIsLoading(true)
     try {
-      const currentUser = await DataService.getCurrentUser()
       const today = getTodayLocalDateString()
       const selectedVehicle = vehicles.find((vehicle) => String(vehicle.id) === String(selectedVehicleId))
 
       await DataService.addVehicleUsage({
         vehicleId: selectedVehicleId,
         vehicleName: selectedVehicle?.name,
-        employeeId: currentUser!.id,
+        // Maschine der Person zuordnen, die dieser Eintrag betrifft (bei Vertretung
+        // z. B. Martin) – nicht dem eingeloggten Bediener.
+        employeeId: timeEntry.employeeId,
         projectId: timeEntry.projectId,
         timeEntryId: timeEntry.id,
         date: today,

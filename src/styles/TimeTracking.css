@@ -508,3 +508,59 @@
     min-width: 200px;
   }
 }
+
+/* ── Personen-Umschalter (Live-Vertretung beim Stempeln) ───────────────── */
+.employee-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs, 6px);
+  width: 100%;
+}
+
+.employee-switcher-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.employee-switcher-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--border-light);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg, 14px);
+}
+
+.employee-switcher-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--spacing-sm, 10px) var(--spacing-md, 14px);
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-base, 0.15s), color var(--transition-base, 0.15s),
+    box-shadow var(--transition-base, 0.15s);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.employee-switcher-tab:hover:not(.is-active):not(:disabled) {
+  color: var(--text-color);
+}
+
+.employee-switcher-tab.is-active {
+  background: var(--card-background, #fff);
+  color: var(--primary-dark);
+  box-shadow: var(--shadow-sm);
+}
+
+.employee-switcher-tab:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

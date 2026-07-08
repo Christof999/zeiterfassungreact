@@ -112,7 +112,9 @@ const ExtendedClockOutModal: React.FC<ExtendedClockOutModalProps> = ({
           await DataService.addVehicleUsage({
             vehicleId: row.vehicleId,
             vehicleName: selectedVehicle?.name,
-            employeeId: currentUser.id,
+            // Maschine der Person zuordnen, die dieser Eintrag betrifft (bei Vertretung
+            // z. B. Martin) – nicht dem eingeloggten Bediener.
+            employeeId: timeEntry.employeeId,
             projectId: timeEntry.projectId,
             timeEntryId: timeEntry.id,
             date: today,
