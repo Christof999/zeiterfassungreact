@@ -6,6 +6,12 @@ import { formatDateForInputLocal } from '../../../utils/dateUtils'
 import { getBavariaHolidayName } from '../../../utils/bavariaHolidays'
 import { collectEntryDocumentation } from '../../../utils/entryDocumentation'
 import { getFileImageSrc } from '../../../utils/fileImageSrc'
+import {
+  msToMinutes,
+  calculateWorkHours,
+  workMinutesFromParts,
+  minutesToHoursLabel
+} from './reports/reportCalc'
 import '../../../styles/AdminTabs.css'
 import '../../../styles/ReportPrint.css'
 
@@ -303,36 +309,6 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     return project?.name || projectId
   }
 
-  const calculateWorkHours = (clockIn: string, clockOut: string, pauseMinutes: number): string => {
-    if (!clockIn || !clockOut) return '-'
-    const [inH, inM] = clockIn.split(':').map(Number)
-    const [outH, outM] = clockOut.split(':').map(Number)
-    if (isNaN(inH) || isNaN(inM) || isNaN(outH) || isNaN(outM)) return '-'
-    let totalMinutes = (outH * 60 + outM) - (inH * 60 + inM) - pauseMinutes
-    if (totalMinutes < 0) totalMinutes += 24 * 60
-    const hours = Math.floor(totalMinutes / 60)
-    const minutes = Math.abs(totalMinutes % 60)
-    return `${hours}:${minutes.toString().padStart(2, '0')}`
-  }
-
-  const msToMinutes = (ms: number): number => Math.round(ms / (1000 * 60))
-
-  const workMinutesFromParts = (clockIn: string, clockOut: string, pauseMinutes: number): number => {
-    if (!clockIn || !clockOut) return 0
-    const [inH, inM] = clockIn.split(':').map(Number)
-    const [outH, outM] = clockOut.split(':').map(Number)
-    if (isNaN(inH) || isNaN(inM) || isNaN(outH) || isNaN(outM)) return 0
-    let totalMinutes = outH * 60 + outM - (inH * 60 + inM) - pauseMinutes
-    if (totalMinutes < 0) totalMinutes += 24 * 60
-    return Math.max(0, totalMinutes)
-  }
-
-  const minutesToHoursLabel = (totalMinutes: number): string => {
-    const h = Math.floor(totalMinutes / 60)
-    const m = Math.round(totalMinutes % 60)
-    return `${h}:${m.toString().padStart(2, '0')}`
-  }
-
   const workMinutesFromOriginalEntry = (entry: TimeEntry): number => {
     if (entry.isVacationDay) return VACATION_WORK_MINUTES
     const clockInDate = convertToDate(entry.clockInTime)
@@ -362,14 +338,17 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     setHasSearched(true)
 
     try {
-      const [allEntries, leaveRequests] = await Promise.all([
-        DataService.getTimeEntriesByEmployeeId(selectedEmployeeId),
-        DataService.getLeaveRequestsByEmployee(selectedEmployeeId)
-      ])
       const start = new Date(startDate)
       start.setHours(0, 0, 0, 0)
       const end = new Date(endDate)
       end.setHours(23, 59, 59, 999)
+
+      const [allEntries, leaveRequests] = await Promise.all([
+        // Zeitraum serverseitig eingrenzen (spart Daten bei langer Mitarbeiter-Historie);
+        // der Datumsfilter unten bleibt als Sicherheitsnetz für Alt-Einträge bestehen.
+        DataService.getTimeEntriesByEmployeeId(selectedEmployeeId, { from: start, to: end }),
+        DataService.getLeaveRequestsByEmployee(selectedEmployeeId)
+      ])
 
       const filteredEntries = allEntries.filter(entry => {
         const entryDate = convertToDate(entry.clockInTime)
@@ -919,20 +898,24 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       const project = projects.find(p => p.id === selectedProjectId)
       setSelectedProject(project || null)
 
-      // Zeiteinträge laden
-      let timeEntries = await DataService.getTimeEntriesByProject(selectedProjectId)
-      
-      // Optional nach Zeitraum filtern
-      if (useTimeFilter && startDate && endDate) {
-        const start = new Date(startDate)
-        start.setHours(0, 0, 0, 0)
-        const end = new Date(endDate)
-        end.setHours(23, 59, 59, 999)
-        
+      // Optionalen Zeitraum vorab bestimmen, um ihn schon serverseitig einzugrenzen
+      const rangeStart = useTimeFilter && startDate ? new Date(startDate) : null
+      if (rangeStart) rangeStart.setHours(0, 0, 0, 0)
+      const rangeEnd = useTimeFilter && endDate ? new Date(endDate) : null
+      if (rangeEnd) rangeEnd.setHours(23, 59, 59, 999)
+
+      // Zeiteinträge laden (bei aktivem Zeitfilter serverseitig eingegrenzt)
+      let timeEntries = await DataService.getTimeEntriesByProject(
+        selectedProjectId,
+        rangeStart && rangeEnd ? { from: rangeStart, to: rangeEnd } : undefined
+      )
+
+      // Datumsfilter als Sicherheitsnetz erneut anwenden (Alt-Einträge / Fallback)
+      if (rangeStart && rangeEnd) {
         timeEntries = timeEntries.filter(entry => {
           const entryDate = convertToDate(entry.clockInTime)
           if (!entryDate) return false
-          return entryDate >= start && entryDate <= end
+          return entryDate >= rangeStart && entryDate <= rangeEnd
         })
       }
 
@@ -949,9 +932,10 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
         
         const diffMs = clockOut.getTime() - clockIn.getTime()
         const pauseMs = entry.pauseTotalTime || 0
-        const workMs = diffMs - pauseMs
+        // Pause länger als Anwesenheit darf keine negativen Stunden erzeugen
+        const workMs = Math.max(0, diffMs - pauseMs)
         const hours = workMs / (1000 * 60 * 60)
-        
+
         const employee = allEmployees.find(e => e.id === entry.employeeId)
         const hourlyRate = employee?.hourlyWage || employee?.hourlyRate || 0
         const employeeName = employee?.name || `${employee?.firstName || ''} ${employee?.lastName || ''}`.trim() || entry.employeeId

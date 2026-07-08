@@ -10,7 +10,18 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true
+    sourcemap: true,
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        // Große, selten wechselnde Abhängigkeiten in eigene Chunks auslagern,
+        // damit sie separat gecacht werden und den App-Chunk klein halten.
+        manualChunks: {
+          firebase: ['firebase/app', 'firebase/firestore', 'firebase/auth', 'firebase/storage'],
+          react: ['react', 'react-dom', 'react-router-dom']
+        }
+      }
+    }
   },
   root: '.',
   publicDir: 'public',

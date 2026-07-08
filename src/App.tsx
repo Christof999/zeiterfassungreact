@@ -1,16 +1,19 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { DataService } from './services/dataService'
 import Login from './components/Login'
 import TimeTracking from './components/TimeTracking'
 import VacationRequests from './components/VacationRequests'
-import AdminLogin from './components/admin/AdminLogin'
-import AdminDashboard from './components/admin/AdminDashboard'
 import SplashScreen from './components/SplashScreen'
 import ToastContainer from './components/ToastContainer'
 import OfflineUploadIndicator from './components/OfflineUploadIndicator'
 import { offlineUploadQueue } from './services/offlineUploadQueue'
 import './styles/App.css'
+
+// Admin-Bereich (Dashboard, Nachkalkulation, KI-Chat, Maschinen-Verwaltung) erst bei
+// Bedarf laden – Mitarbeiter auf der Baustelle müssen diesen Code nicht mitladen.
+const AdminLogin = lazy(() => import('./components/admin/AdminLogin'))
+const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard'))
 
 function App() {
   const [isLoading, setIsLoading] = useState(true)
@@ -19,7 +22,7 @@ function App() {
   useEffect(() => {
     // Initialize Firebase - DataService initializes itself
     // Just ensure auth is ready
-    DataService.authReady
+    void DataService.authReady
 
     // Offline-Upload-Queue starten: reicht zwischengespeicherte Baustellenfotos nach,
     // sobald wieder Netz da ist (auch nach App-Neustart).
@@ -46,15 +49,17 @@ function App() {
     <BrowserRouter>
       <ToastContainer />
       <OfflineUploadIndicator />
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/time-tracking" element={<TimeTracking />} />
-        <Route path="/vacation" element={<VacationRequests />} />
-        <Route path="/admin/login" element={<AdminLogin />} />
-        <Route path="/admin/dashboard" element={<AdminDashboard />} />
-        <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
-        <Route path="/" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <Suspense fallback={<div className="loading">Lade...</div>}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/time-tracking" element={<TimeTracking />} />
+          <Route path="/vacation" element={<VacationRequests />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin/dashboard" element={<AdminDashboard />} />
+          <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   )
 }

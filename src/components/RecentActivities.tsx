@@ -93,7 +93,8 @@ const RecentActivities: React.FC<RecentActivitiesProps> = ({ employeeId, refresh
 
     const diffMs = clockOut.getTime() - clockIn.getTime()
     const pauseTotalTime = entry.pauseTotalTime || 0
-    const actualWorkTime = diffMs - pauseTotalTime
+    // Pause länger als Anwesenheit darf keine negative Arbeitszeit ergeben
+    const actualWorkTime = Math.max(0, diffMs - pauseTotalTime)
     const hours = actualWorkTime / (1000 * 60 * 60)
     return hours.toFixed(2).replace('.', ',')
   }

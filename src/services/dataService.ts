@@ -27,6 +27,11 @@ import { withTimeout } from '../utils/withTimeout'
 import { sanitizeTimeEntryForRead } from '../utils/sanitizeTimeEntry'
 import { getFileImageSrc } from '../utils/fileImageSrc'
 import { toFileUploadRef } from '../utils/fileUploadRef'
+import {
+  convertToDate as convertToDateShared,
+  calculateWorkingDays as calculateWorkingDaysShared,
+  calculateTotalWorkHours as calculateTotalWorkHoursShared
+} from './data/shared'
 
 const STORAGE_UPLOAD_TIMEOUT_MS = 25_000
 const IMAGE_PREPARE_TIMEOUT_MS = 90_000
@@ -387,11 +392,42 @@ class DataServiceClass {
 
   async getTimeEntriesByEmployeeId(
     employeeId: string,
-    opts?: { limit?: number }
+    opts?: { limit?: number; from?: Date; to?: Date }
   ): Promise<TimeEntry[]> {
     await this.authReadyPromise
     try {
       const timeEntriesRef = collection(db, 'timeEntries')
+
+      // Serverseitiger Zeitraumfilter (clockInTime) statt komplette Mitarbeiter-Historie
+      // zu laden und erst im Browser zu filtern. Benötigt den Composite-Index
+      // (employeeId ASC, clockInTime ASC/DESC) aus firestore.indexes.json.
+      // Defensiv: bei fehlendem Index ODER leerem Ergebnis (z. B. Alt-Einträge ohne
+      // Timestamp-clockInTime) fällt die Abfrage auf die ungefilterte Mitarbeiter-Query
+      // zurück – der Datumsfilter im Aufrufer bleibt die Autorität, es geht nichts verloren.
+      if (opts?.from && opts?.to && !(opts.limit && opts.limit > 0)) {
+        try {
+          const rangeQuery = query(
+            timeEntriesRef,
+            where('employeeId', '==', employeeId),
+            where('clockInTime', '>=', Timestamp.fromDate(opts.from)),
+            where('clockInTime', '<=', Timestamp.fromDate(opts.to))
+          )
+          const rangeSnap = await getDocs(rangeQuery)
+          if (!rangeSnap.empty) {
+            return rangeSnap.docs.map((d) =>
+              sanitizeTimeEntryForRead({ id: d.id, ...d.data() } as TimeEntry)
+            )
+          }
+        } catch (rangeError) {
+          if (isDevMode) {
+            console.warn(
+              'Zeitraum-Query fehlgeschlagen (Composite-Index fehlt?), Fallback auf volle Mitarbeiter-Query:',
+              rangeError
+            )
+          }
+        }
+      }
+
       let snapshot
       if (opts?.limit && opts.limit > 0) {
         try {
@@ -2480,20 +2516,7 @@ class DataServiceClass {
 
   // Hilfsfunktion: Arbeitstage berechnen (ohne Wochenenden)
   calculateWorkingDays(startDate: Date, endDate: Date): number {
-    let count = 0
-    const current = new Date(startDate)
-    const end = new Date(endDate)
-    
-    while (current <= end) {
-      const dayOfWeek = current.getDay()
-      // 0 = Sonntag, 6 = Samstag
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        count++
-      }
-      current.setDate(current.getDate() + 1)
-    }
-    
-    return count
+    return calculateWorkingDaysShared(startDate, endDate)
   }
 
   // Admin: Dashboard-Daten
@@ -2535,37 +2558,44 @@ class DataServiceClass {
   }
 
   calculateTotalWorkHours(entries: TimeEntry[]): number {
-    let totalHours = 0
-    
-    entries.forEach(entry => {
-      if (entry.clockOutTime) {
-        const clockIn = entry.clockInTime instanceof Timestamp
-          ? entry.clockInTime.toDate()
-          : entry.clockInTime instanceof Date
-          ? entry.clockInTime
-          : new Date(entry.clockInTime)
-        
-        const clockOut = entry.clockOutTime instanceof Timestamp
-          ? entry.clockOutTime.toDate()
-          : entry.clockOutTime instanceof Date
-          ? entry.clockOutTime
-          : new Date(entry.clockOutTime)
-        
-        const diffMs = clockOut.getTime() - clockIn.getTime()
-        const pauseTotalTime = entry.pauseTotalTime || 0
-        const actualWorkTime = diffMs - pauseTotalTime
-        const hours = actualWorkTime / (1000 * 60 * 60)
-        totalHours += hours
-      }
-    })
-    
-    return totalHours
+    return calculateTotalWorkHoursShared(entries)
   }
 
-  async getTimeEntriesByProject(projectId: string): Promise<TimeEntry[]> {
+  async getTimeEntriesByProject(
+    projectId: string,
+    opts?: { from?: Date; to?: Date }
+  ): Promise<TimeEntry[]> {
     await this.authReadyPromise
     try {
       const timeEntriesRef = collection(db, 'timeEntries')
+
+      // Serverseitiger Zeitraumfilter (siehe getTimeEntriesByEmployeeId). Defensiv:
+      // bei fehlendem Composite-Index oder leerem Ergebnis Fallback auf die volle
+      // Projekt-Query – der Datumsfilter im Aufrufer bleibt maßgeblich.
+      if (opts?.from && opts?.to) {
+        try {
+          const rangeQuery = query(
+            timeEntriesRef,
+            where('projectId', '==', projectId),
+            where('clockInTime', '>=', Timestamp.fromDate(opts.from)),
+            where('clockInTime', '<=', Timestamp.fromDate(opts.to))
+          )
+          const rangeSnap = await getDocs(rangeQuery)
+          if (!rangeSnap.empty) {
+            return rangeSnap.docs.map((d) =>
+              sanitizeTimeEntryForRead({ id: d.id, ...d.data() } as TimeEntry)
+            )
+          }
+        } catch (rangeError) {
+          if (isDevMode) {
+            console.warn(
+              'Projekt-Zeitraum-Query fehlgeschlagen (Composite-Index fehlt?), Fallback auf volle Projekt-Query:',
+              rangeError
+            )
+          }
+        }
+      }
+
       const q = query(timeEntriesRef, where('projectId', '==', projectId))
       const snapshot = await getDocs(q)
 
@@ -2909,29 +2939,7 @@ class DataServiceClass {
 
   // Hilfsfunktion zum Konvertieren von Timestamps
   private convertToDate(timestamp: any): Date {
-    if (!timestamp) return new Date()
-    
-    if (timestamp instanceof Date) {
-      return timestamp
-    }
-    
-    if (timestamp instanceof Timestamp) {
-      return timestamp.toDate()
-    }
-    
-    if (timestamp.toDate && typeof timestamp.toDate === 'function') {
-      return timestamp.toDate()
-    }
-    
-    if (typeof timestamp === 'string' || typeof timestamp === 'number') {
-      return new Date(timestamp)
-    }
-    
-    if (timestamp.seconds !== undefined) {
-      return new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000)
-    }
-    
-    return new Date()
+    return convertToDateShared(timestamp)
   }
 
   async getAllTimeEntries(): Promise<TimeEntry[]> {
