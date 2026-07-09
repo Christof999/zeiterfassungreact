@@ -155,10 +155,11 @@ html, body {
     height: auto;
   }
 
-  body {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
+  /* Kein "overflow-y: auto" auf dem body (mobil): das macht den body zu einem
+     eigenen, inhaltshohen Scroll-Container neben dem Viewport – auf Android
+     ließ sich die Seite dann nur mit ZWEI Fingern scrollen. Ohne die Regel ist
+     das Dokument/Viewport der einzige, natürliche Scroller (Ein-Finger-Scroll,
+     wie in den Modals und wie in timo_Zeiterfassung). */
 }
 
 /* Typography - Mobile optimiert */
