@@ -76,32 +76,40 @@ export async function uploadDocumentationWithOfflineFallback(params: {
   let deferring = false
   let startedOffline = false
 
-  const totalPhotos = batches.reduce((n, b) => n + b.items.length, 0)
-  let index = 0
-
+  // Alle Fotos aus allen Batches in eine flache Aufgabenliste bringen, damit wir sie mit
+  // begrenzter Parallelität abarbeiten können (Komprimierung überlappt mit Upload).
+  type UploadTask = { item: PhotoUploadItem; batch: PhotoBatch; index: number }
+  const tasks: UploadTask[] = []
   for (const batch of batches) {
     for (const item of batch.items) {
-      index += 1
+      tasks.push({ item, batch, index: tasks.length + 1 })
+    }
+  }
+  const totalPhotos = tasks.length
+  const succeeded = new Set<number>()
 
-      const pushDeferred = () => {
-        const photo = toPendingPhoto(item, batch)
-        if (batch.category === 'site') deferredSite.push(photo)
-        else deferredDoc.push(photo)
-      }
+  // Bereits vor dem ersten Foto offline → gar nicht erst versuchen, direkt zwischenspeichern
+  if (totalPhotos > 0 && isOffline()) {
+    startedOffline = true
+    deferring = true
+  }
 
-      if (deferring) {
-        pushDeferred()
-        continue
-      }
+  const CONCURRENCY = 2
+  let nextPos = 0
 
-      // Bereits beim ersten Foto offline → gar nicht erst versuchen, direkt zwischenspeichern
+  const worker = async (): Promise<void> => {
+    while (!deferring) {
+      const pos = nextPos++
+      if (pos >= tasks.length) return
+
+      // Netz zwischendurch verloren → restliche Fotos in die Offline-Queue
       if (isOffline()) {
-        if (index === 1) startedOffline = true
+        if (tasks[pos].index === 1) startedOffline = true
         deferring = true
-        pushDeferred()
-        continue
+        return
       }
 
+      const { item, batch, index } = tasks[pos]
       onProgress?.({ message: `${batch.label} ${index} von ${totalPhotos}`, step })
       try {
         const upload = await DataService.uploadFile(
@@ -119,15 +127,33 @@ export async function uploadDocumentationWithOfflineFallback(params: {
         )
         if (batch.category === 'site') siteUploads.push(upload)
         else documentUploads.push(upload)
+        succeeded.add(pos)
         step += 1
         onProgress?.({ message: `${batch.label} ${index} gespeichert`, step })
       } catch (err) {
+        // Dauerhafter Fehler (z. B. zu groß) → hart scheitern, nicht endlos requeuen
         if (!shouldDeferUpload(err)) throw err
+        // Netzproblem → ab hier keine neuen Uploads mehr starten, Rest wird verschoben
         if (index === 1) startedOffline = true
         deferring = true
-        pushDeferred()
+        return
       }
     }
+  }
+
+  if (!deferring) {
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => worker())
+    )
+  }
+
+  // Alles, was nicht erfolgreich online hochgeladen wurde, wandert in die Offline-Queue
+  for (let pos = 0; pos < tasks.length; pos++) {
+    if (succeeded.has(pos)) continue
+    const { item, batch } = tasks[pos]
+    const photo = toPendingPhoto(item, batch)
+    if (batch.category === 'site') deferredSite.push(photo)
+    else deferredDoc.push(photo)
   }
 
   const deferredPhotos = deferredSite.length + deferredDoc.length

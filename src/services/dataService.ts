@@ -1324,9 +1324,10 @@ class DataServiceClass {
     // Nicht-Bilder (z. B. PDF) niemals durch den Bild-Encoder schicken — das würde hängen.
     if (!this.isCompressibleImage(file)) return file
     const isDocument = this.isDocumentFileType(type)
-    // Auf Mobilgeräten schneller, in Storage trotzdem deutlich schärfer als früher
-    const maxWidth = isDocument ? 2400 : 1800
-    return this.compressImage(file, isDocument ? 0.9 : 0.85, maxWidth, { forceJpeg: true })
+    // Tempo-optimiert fürs Baustellen-Netz: kleinere Uploads ≈ proportional schnellerer
+    // Upload. Am Bildschirm weiterhin scharf, Dokumente/Rechnungen gut lesbar.
+    const maxWidth = isDocument ? 1800 : 1280
+    return this.compressImage(file, isDocument ? 0.8 : 0.72, maxWidth, { forceJpeg: true })
   }
 
   /** Lässt sich die Datei sinnvoll per Canvas rastern/komprimieren? */
