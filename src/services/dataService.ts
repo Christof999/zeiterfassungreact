@@ -1317,6 +1317,12 @@ class DataServiceClass {
   private async uploadFileToStorage(file: File, objectPath: string): Promise<string> {
     const objectRef = storageRef(storage, objectPath)
     await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' })
+    // Objekte sind public lesbar (Storage-Regel `allow read: if true`), daher lässt sich die
+    // Download-URL direkt bauen — das spart pro Bild den zusätzlichen getDownloadURL-Roundtrip.
+    const bucket = storage.app?.options?.storageBucket
+    if (bucket) {
+      return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(objectPath)}?alt=media`
+    }
     return getDownloadURL(objectRef)
   }
 
@@ -1327,7 +1333,11 @@ class DataServiceClass {
     // Tempo-optimiert fürs Baustellen-Netz: kleinere Uploads ≈ proportional schnellerer
     // Upload. Am Bildschirm weiterhin scharf, Dokumente/Rechnungen gut lesbar.
     const maxWidth = isDocument ? 1800 : 1280
-    return this.compressImage(file, isDocument ? 0.8 : 0.72, maxWidth, { forceJpeg: true })
+    // preferWebp: kleinere Uploads, wo der Browser es kann; forceJpeg als Fallback (nie PNG).
+    return this.compressImage(file, isDocument ? 0.8 : 0.72, maxWidth, {
+      forceJpeg: true,
+      preferWebp: true
+    })
   }
 
   /** Lässt sich die Datei sinnvoll per Canvas rastern/komprimieren? */
@@ -1545,12 +1555,35 @@ class DataServiceClass {
     })
   }
 
-  private resolveOutputType(file: File, forceJpeg?: boolean): string {
-    return forceJpeg || !(file.type || '').includes('png') ? 'image/jpeg' : 'image/png'
+  private webpSupport?: boolean
+  /** Kann dieser Browser per Canvas WebP kodieren? (memoisiert) */
+  private canEncodeWebp(): boolean {
+    if (this.webpSupport === undefined) {
+      try {
+        const c = document.createElement('canvas')
+        c.width = 1
+        c.height = 1
+        this.webpSupport = c.toDataURL('image/webp').startsWith('data:image/webp')
+      } catch {
+        this.webpSupport = false
+      }
+    }
+    return this.webpSupport
+  }
+
+  private resolveOutputType(
+    file: File,
+    options?: { forceJpeg?: boolean; preferWebp?: boolean }
+  ): string {
+    // WebP ist bei gleicher Sichtqualität deutlich kleiner → schnellerer Upload.
+    // Nur nutzen, wenn der Browser es wirklich kodieren kann (sonst JPEG).
+    if (options?.preferWebp && this.canEncodeWebp()) return 'image/webp'
+    return options?.forceJpeg || !(file.type || '').includes('png') ? 'image/jpeg' : 'image/png'
   }
 
   private blobToFile(blob: Blob, originalName: string, outputType: string): File {
-    const ext = outputType === 'image/png' ? '.png' : '.jpg'
+    const ext =
+      outputType === 'image/png' ? '.png' : outputType === 'image/webp' ? '.webp' : '.jpg'
     const baseName = (originalName || 'upload').replace(/\.[^.]+$/, '') || 'upload'
     return new File([blob], `${baseName}${ext}`, { type: outputType })
   }
@@ -1646,11 +1679,11 @@ class DataServiceClass {
     file: File,
     quality: number,
     maxWidth: number,
-    options?: { forceJpeg?: boolean }
+    options?: { forceJpeg?: boolean; preferWebp?: boolean }
   ): Promise<File> {
     const decoded = await this.decodeImageSource(file)
     try {
-      const outputType = this.resolveOutputType(file, options?.forceJpeg)
+      const outputType = this.resolveOutputType(file, options)
       const blob = await this.renderToBlob(
         decoded.source,
         decoded.width,
