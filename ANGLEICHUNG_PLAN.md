@@ -48,6 +48,33 @@ zwei Ansichten auf denselben Datensatz.
 Daraus folgt: **Lauffers Nachkalkulation besteht aus Stunden und Maschinen.**
 Ohne erfassten Verbrauch gibt es keine Material-Ist-Seite — siehe Phase 2.
 
+## Entschieden (Nachtrag 3, 07.08.2026)
+
+**Maschinen bekommen zwei Sätze.** Was die Stunde uns kostet und was dem Kunden
+verrechnet wird, sind getrennte Felder.
+
+**Der bestehende Wert in `Vehicle.hourlyRate` ist der Kostensatz.** Das ist die
+entscheidende Auskunft für die Umsetzung: die gepflegten Zahlen bleiben gültig und
+bedeuten weiterhin dasselbe. Es kommt **ein Feld dazu**, es wird keines umgedeutet.
+
+| Feld | Bedeutung | Bestand |
+|---|---|---|
+| `hourlyRate` | **Kostensatz** — was die Maschinenstunde das Unternehmen kostet | bleibt, Werte unverändert gültig |
+| `hourlyBillingRate` | **Verrechnungssatz** — was dem Kunden je Stunde berechnet wird | neu, anfangs leer |
+
+Keine Datenmigration. Kein Risiko, dass bestehende Zahlen still ihre Bedeutung
+wechseln — der teuerste Fehler, den man hier machen könnte.
+
+⚠️ **Das Eingabefeld heißt heute „Stundenpreis (€)"** (`VehicleModal.tsx:98`).
+„Preis" klingt nach Verkauf, gemeint sind aber Kosten. Die Beschriftung ist also
+schon jetzt irreführend und wird bei der Gelegenheit korrigiert — sonst tragen
+Anwender künftig in das falsche der beiden Felder ein.
+
+**Bewusst in Kauf genommen:** beim Mitarbeiter heißt der Kostensatz
+`hourlyCostRate`, bei der Maschine `hourlyRate`. Die Namen sind uneinheitlich. Ein
+Umbenennen wäre schöner, kostet aber eine Datenmigration ohne fachlichen Gewinn —
+stattdessen wird die Bedeutung im Typ dokumentiert.
+
 ---
 
 ## 0. Ausgangslage
@@ -394,6 +421,12 @@ Der zweite Teil der Kommunikation. Setzt Phase 1 voraus.
 > Bei den Mitarbeitern ist derselbe Join korrekt gebaut (`employeesMap` aus der
 > `employees`-Collection) — bei den Maschinen fehlt er schlicht.
 >
+> **Die Zeiterfassung macht es richtig**: `ReportsTab.tsx:989` schlägt den Satz über
+> `vehicles.find(v => v.id === usage.vehicleId)` nach. Der Fehler sitzt also allein
+> im Rechnungsprogramm — dieselbe Buchung ergibt in der Zeiterfassung Kosten und im
+> Rechnungsprogramm 0 €. Ein guter Gegentest: beide Ansichten für dasselbe Projekt
+> öffnen und vergleichen.
+>
 > - [ ] `vehicles`-Collection laden und als `vehiclesMap` beim Aggregieren joinen, analog zu `employeesMap`
 > - [ ] Satz aus der Buchung hat Vorrang, `Vehicle.hourlyRate` ist der Rückfall
 > - [ ] `hoursUsed` als Stundenquelle gleichwertig zu `hours` behandeln
@@ -408,9 +441,25 @@ Maschinen, das Panel zeigt nur eine Kostentabelle, und die Typen
 werden aber **nirgends gebaut** — toter Code. Für Lauffer, wo Maschinenstunden ein
 eigener Erlösträger sind, reicht das nicht.
 
-- [ ] Maschinen als gleichrangige dritte Sektion neben Stunden und Material: Menge (Std), Kostensatz, Verrechnungssatz, Erlös, Kosten, Ergebnis
-- [ ] Verrechnungssatz für Maschinen klären und in `Vehicle` pflegbar machen — heute gibt es nur `hourlyRate`, ohne dass festgelegt wäre, ob das Kosten oder Erlös sind (siehe offene Frage 4)
+- [ ] Maschinen als gleichrangige zweite Sektion neben den Stunden: Menge (Std), Kostensatz, Verrechnungssatz, Erlös, Kosten, Ergebnis
 - [ ] Die toten Typen `LaborContribution` / `ContributionMargin` / `MaterialProfitSummary` entweder ausbauen und tatsächlich befüllen oder nicht mitportieren — nicht als Karteileichen übernehmen
+
+**Zweiter Satz für Maschinen — die betroffenen Stellen**
+
+`Vehicle.hourlyRate` bleibt der Kostensatz, `hourlyBillingRate` kommt dazu
+(Begründung im Entschieden-Block oben). Zu ändern ist:
+
+*Zeiterfassung*
+- [ ] `types/index.ts`: `hourlyBillingRate?: number` in `Vehicle`, beide Felder im Kommentar klar auseinanderhalten
+- [ ] `VehicleModal.tsx`: zwei Eingabefelder; das bestehende von „Stundenpreis (€)" in **„Kostensatz (€/Std)"** umbenennen, neu **„Verrechnungssatz (€/Std)"**
+- [ ] `VehiclesTab.tsx`: Spalte „€/Std" auf beide Sätze erweitern
+- [ ] `ReportsTab.tsx:989` bleibt unverändert — die Kostenrechnung der Zeiterfassung nutzt weiter `vehicle?.hourlyRate` und ist damit korrekt
+- [ ] `agentService.ts`: `stundensatz` in `erstelleMaschine` / `aendereMaschine` behält die Kosten-Bedeutung, `verrechnungssatz` kommt als zweites Argument dazu; in `listeMaschinen` beide ausgeben
+
+*Rechnungsprogramm*
+- [ ] `MachineTimeEntry` um Verrechnungssatz, Erlös und Ergebnis erweitern
+- [ ] Beim `vehicles`-Join (siehe Fehler oben) beide Sätze mitnehmen
+- [ ] **Fehlender Verrechnungssatz wird als „nicht gepflegt" ausgewiesen**, nicht stillschweigend mit dem Kostensatz gleichgesetzt — sonst steht überall ein Ergebnis von 0 €, das nach „kein Gewinn" aussieht statt nach „nicht erfasst". Timo löst das beim Material genauso über `hasMissingPurchasePrice`.
 - [ ] `CompanyData.defaultHourlyRate` + Feld auf der Setup-Seite
 - [ ] Mitarbeiterfelder in der Zeiterfassung, die die Nachkalkulation braucht: `hourlyCostRate`, `ancillaryWageCosts`, `isApprentice`, `fixedMonthlySalary` in `EmployeeModal`
 - [ ] Projekt-Autovorschlag über den Kundennamen bei neuer Rechnung
@@ -565,8 +614,14 @@ werden übernommen · **Nachkalkulation führt Maschinen und Stunden** ·
 **Materialverbrauch entfällt, nur der Materialstamm kommt** · Diagnose-Tab und
 toter Code entfallen.
 
-Noch offen — **eine einzige Frage**:
+**Keine offenen Fragen mehr.** Der Plan ist entscheidungsreif; die Umsetzung kann
+mit Phase 0 beginnen.
 
-1. **Ist `Vehicle.hourlyRate` ein Kosten- oder ein Verrechnungssatz?** Für „Maschinen und Stunden" in der Nachkalkulation braucht es beides getrennt: was die Maschine kostet und was dem Kunden berechnet wird. Heute gibt es nur ein Feld. Zwei Wege: zweites Feld `costRate` in `Vehicle` ergänzen (sauberer, aber Pflegeaufwand je Maschine), oder `hourlyRate` als Verrechnungssatz festlegen und die Kostenseite über einen Prozentsatz schätzen.
+Was während der Umsetzung noch zu klären ist, betrifft nur Feinheiten und lässt
+sich in der jeweiligen Phase entscheiden:
 
-Damit ist der Plan entscheidungsreif. Umsetzung kann mit Phase 0 beginnen.
+- Welche Maschinen bekommen überhaupt einen Verrechnungssatz? Solange keiner
+  gepflegt ist, weist die Nachkalkulation die Maschine als „Verrechnungssatz nicht
+  gepflegt" aus — das ist ein brauchbarer Zwischenzustand, kein Blocker.
+- Welche Standard-Einheiten und Beschriftungen im Materialstamm für Gartenbau
+  sinnvoll sind (Phase 9d).
