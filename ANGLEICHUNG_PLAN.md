@@ -29,6 +29,25 @@ Kategorienamen — eine Zweiteilung des Stamms. Das greift direkt in Phase 1 ein
 
 **Beleg-Editor und Rechenlogik werden vollständig übernommen.**
 
+## Entschieden (Nachtrag 2, 07.08.2026)
+
+**Toter Code kommt weg.** `constants/stampForDelegates.ts` wird gelöscht, nicht verdrahtet.
+
+**Diagnose-Tab wird nicht übernommen.**
+
+**Materialverbrauch entfällt für Lauffer vollständig** — nicht nur in der
+Mitarbeiteransicht, sondern überall. Kein Erfassen beim Ausstempeln, keine
+Gutschriften, keine Ist-Material-Auswertung.
+
+**Was bleibt: der Materialstamm als Tabelle.** Der Admin legt Material an und
+pflegt es, genau wie bei Timo. Rechnungsprogramm und Zeiterfassung benutzen dafür
+**dieselbe Tabelle** — die Collection `materialTypes` in der Zeiterfassungs-Firebase.
+Die Artikelseite des Rechnungsprogramms und der Material-Tab der Zeiterfassung sind
+zwei Ansichten auf denselben Datensatz.
+
+Daraus folgt: **Lauffers Nachkalkulation besteht aus Stunden und Maschinen.**
+Ohne erfassten Verbrauch gibt es keine Material-Ist-Seite — siehe Phase 2.
+
 ---
 
 ## 0. Ausgangslage
@@ -73,6 +92,11 @@ Das ist der wichtigste inhaltliche Unterschied und die Grundlage für alles ande
 8. **Zwei Kostensätze je Mitarbeiter.** `hourlyWage` (Lohn) und `hourlyCostRate` (Vollkosten inkl. `ancillaryWageCosts`), dazu `isApprentice` / `fixedMonthlySalary` / `mealAllowanceRate`.
 
 Die Doku `ZEITERFASSUNG_INTEGRATION.md` und `ZEITERFASSUNG_SECURITY_RULES.txt` sind in beiden Rechnungsprogramm-Repos **byte-identisch** — dokumentiert ist der Zielzustand also längst, nur nicht implementiert.
+
+**Für Lauffer gilt davon alles außer dem Materialverbrauch.** Punkt 1, 2, 3, 5,
+7 und 8 werden unverändert übernommen. Punkt 4 kommt ohne die Verbrauchserfassung
+beim Ausstempeln (die Soll-Positionen wandern trotzdem ins Projekt, sie dienen der
+Angebots-/Rechnungsseite). Punkt 6 schrumpft auf Berichte und Fotos.
 
 ---
 
@@ -239,7 +263,9 @@ keiner Timo-Komponente benutzt und können entfallen.
 | Kategorie-Einrichtungshilfe „Bauchemie / Fliesen / Sonstiges" | Lauffer trennt stattdessen Dienstleistung und Material (Phase 9d) |
 | „Facharbeiter" / „Facharbeiter B" als feste Satzbezeichnungen | Timo-Nomenklatur aus deren Angeboten |
 | Entfernung der Maschinen-Funktion | siehe 2.3 |
-| Materialpflicht beim Ausstempeln in der Mitarbeiteransicht | ausdrücklicher Wunsch |
+| **Materialverbrauch komplett**: `MaterialUsageFields`, `TimeEntryMaterialUsage`, `MaterialCredit`, Collection `materialCredits`, Material-Aggregation in `projectExtrasService`, die 3 Verbrauchs-Agententools | **entschieden: entfällt für Lauffer** — nur der Materialstamm kommt |
+| `DiagnosticsTab.tsx`, `tabs/diagnostics/`, `DiagnosticsTab.css`, `api/hero/diagnostics.js` | **entschieden: entfällt** |
+| `constants/stampForDelegates.ts` (bestehender toter Code in `zeiterfassungreact`) | **entschieden: löschen** statt verdrahten |
 
 **Das Branding gehört in Konstanten**, nicht in JSX: `appBranding.ts` (Zeiterfassung) und ein aus `CompanyData` gespeistes `companyProfile.ts` (Rechnungsprogramm), damit künftige Ports keine Firmendaten mehr mitschleppen.
 
@@ -303,11 +329,16 @@ nichts zu sehen (siehe Kasten am Ende des Zeiterfassungsblocks).
 > Das Feld muss **vor** der Migration stehen, sonst müssen hinterher hunderte
 > Datensätze von Hand einsortiert werden.
 
-- [ ] `zeiterfassungreact`: `MaterialType` + `MaterialCredit` + `TimeEntryMaterialUsage` in `types/index.ts`
+**Nur Stammdaten — kein Verbrauch.** `MaterialCredit`, `TimeEntryMaterialUsage`,
+`materialUsages`/`materialCreditUsages` am Zeiteintrag und die Collection
+`materialCredits` bleiben draußen. Es kommt allein die Tabelle.
+
+- [ ] `zeiterfassungreact`: **nur** `MaterialType` in `types/index.ts` — nicht `MaterialCredit`, nicht `TimeEntryMaterialUsage`
 - [ ] **`kind: 'material' | 'service'`** in `MaterialType` (Zeiterfassung) und `Article` (Rechnungsprogramm); fehlender Wert gilt als `material` (abwärtskompatibel)
 - [ ] `getActiveMaterialTypes()` um `kind !== 'service'` erweitern — die eine Stelle, an der die Trennung wirkt
-- [ ] `zeiterfassungreact`: `services/data/materials.ts` portieren, in `dataService` einhängen
-- [ ] `zeiterfassungreact`: Admin-Tab **Material** (`MaterialTypesTab`, `MaterialTypeModal`) — nur Admin
+- [ ] `zeiterfassungreact`: `services/data/materials.ts` portieren, **ohne** die Verbrauchs- und Gutschriftfunktionen; in `dataService` einhängen
+- [ ] `zeiterfassungreact`: Admin-Tab **Material** (`MaterialTypesTab`, `MaterialTypeModal`) — nur Admin, reine Stammdatenpflege
+- [ ] `MaterialUsageFields.tsx` und `MaterialUsageFields.css` **nicht** portieren
 - [ ] `Rechnungsprogramm`: `timeTrackingFirebase.ts` um `getAuth` + `timeTrackingAuthReady` erweitern
 - [ ] `Rechnungsprogramm`: `articleService.ts` auf `materialTypes` in der Zeiterfassungs-Firebase umstellen, inkl. Cache und `getArticlesByIds()`
 - [ ] `Rechnungsprogramm`: `Article.purchasePrice` + `sortOrder`, `ArticleForm`/`Articles` erweitern
@@ -328,7 +359,25 @@ Der zweite Teil der Kommunikation. Setzt Phase 1 voraus.
 - [ ] `Invoice.offerId` / `offerNumber` beim Umwandeln Angebot → Rechnung mitschreiben
 
 **Rückweg (Zeiterfassung → Rechnungsprogramm)**
-- [ ] `projectExtrasService.ts` portieren (Ist-Material aus `timeEntries.materialUsages` + `materialCredits`, Berichte, Fotos)
+- [ ] `projectExtrasService.ts` portieren — **reduziert auf Berichte und Fotos**
+
+> **Ohne Verbrauchserfassung gibt es keine Material-Ist-Seite.**
+>
+> Timos `getProjectExtras()` liefert drei Dinge: aggregiertes Ist-Material,
+> Berichte und Fotos. Das Material speist sich aus `timeEntries.materialUsages`
+> und der Collection `materialCredits` — beides gibt es bei Lauffer nicht und wird
+> es nach der Entscheidung auch nicht geben. `aggregateMaterial()`,
+> `loadMaterialCredits()` und `loadMaterialTypes()` würden dauerhaft leere Listen
+> produzieren.
+>
+> Deshalb: `loadProjectTimeEntries()`, `extractReports()`, `loadFiles()` und
+> `loadEmployeeNames()` übernehmen, den Materialteil weglassen. `ProjectExtras`
+> schrumpft auf `{ reports, files }`, `MaterialUsageEntry` und `totalMaterialCost`
+> entfallen.
+>
+> Genauso in den Typen: `ActualMaterialUsage`, `MaterialProfitLine`,
+> `MaterialProfitSummary` und `ProjectActuals.materials` nicht mitnehmen — sie
+> hätten keine Datenquelle.
 - [ ] `costCalculationService.ts` mergen: 15-Min-Rundung, `pauseTotalTime`, `resolveEmployeeRates` (Lohn vs. Vollkostensatz), Azubi-Logik — **`machineTimes` unverändert erhalten**
 - [ ] `utils/nachkalkulation.ts` + `NachkalkulationPanel.tsx` portieren (Maschinen-Sektion ist enthalten, Zeilen 537–560)
 
@@ -410,12 +459,18 @@ Klein und unabhängig — kann jederzeit vorgezogen werden.
 
 ### Phase 8 — Zeiterfassung: Aufräumen & Angleichen
 - [ ] `dataService.ts` nach `services/data/*` zerlegen (Modulschnitt von Timo **ohne** `hero.ts`, Maschinen-Methoden bleiben)
-- [ ] `agentService.ts` mergen: 19 gemeinsame + 7 Material-Tools + **7 Maschinen-Tools behalten**; Umbenennungen `werArbeitetHeute` → `heutigeArbeitszeiten`, `werIstEingestempelt` → `werArbeitetGerade` übernehmen
+- [ ] `agentService.ts` mergen: 19 gemeinsame Tools + **7 Maschinen-Tools behalten** + **4 Material-Stammdaten-Tools** (`listeMaterialien`, `erstelleMaterial`, `aendereMaterial`, `loescheMaterial`); Umbenennungen `werArbeitetHeute` → `heutigeArbeitszeiten`, `werIstEingestempelt` → `werArbeitetGerade` übernehmen
+- [ ] Die 3 **Verbrauchs**-Tools nicht übernehmen: `trageMaterialEin`, `findeMaterialverbrauch`, `entferneMaterialVonZeiteintrag` — sie hätten bei Lauffer keine Daten
 - [ ] Onboarding-Screen mit Lauffer-Texten
-- [ ] `stampForDelegates.ts`: verdrahten oder entfernen — Entscheidung nötig
+- [ ] `constants/stampForDelegates.ts` **löschen** (toter Code, nirgends importiert)
 - [ ] Restliche CSS-Angleichung (`AdminTabs`, `Modal`, `TimeTracking`, `ReportPrint`)
 
 **Mitarbeiteransicht bleibt unangetastet.** `ClockInForm`, `ClockOutForm`, `ExtendedClockOutModal`, `TimeTracking`, `ProjectSwitchModal`, `AppendDocumentationModal`, `RetroactiveDocumentationListModal`, `VehicleBookingModal` behalten Verhalten und Pflichtfelder von heute. `MaterialUsageFields` wird **nicht** eingebaut; kein Materialverbrauch zum Ausstempeln. Verbesserungen daraus (`SaveProgressOverlay`-Fortschritt, Offline-Queue-Feinschliff) nur, soweit sie die Bedienung nicht ändern.
+
+**Der Materialstamm ist davon nicht betroffen.** Material anlegen und pflegen ist
+reine Admin-Arbeit im Material-Tab (Phase 1) und im Artikelstamm des
+Rechnungsprogramms (Phase 9d) — beides Ansichten auf dieselbe Tabelle
+`materialTypes`. Der Mitarbeiter sieht davon nichts.
 
 ### Phase 9 — Rechnungsprogramm: Beleg-Editor
 
@@ -506,11 +561,12 @@ automatisch**, am Rechner nicht. Das ist eine andere Weiche vor demselben Bildsc
 Geklärt: HERO entfällt · DATEV ② · Krankheitstage ③ · Agentenmodus ja, am Handy
 automatisch, **Tablet bekommt das volle Programm** · Word bleibt, PDF dazu ·
 Artikelstamm trennt Dienstleistung und Material · Beleg-Editor und Rechenlogik
-werden übernommen · **Nachkalkulation führt Maschinen und Stunden**.
+werden übernommen · **Nachkalkulation führt Maschinen und Stunden** ·
+**Materialverbrauch entfällt, nur der Materialstamm kommt** · Diagnose-Tab und
+toter Code entfallen.
 
-Noch offen:
+Noch offen — **eine einzige Frage**:
 
-1. **`stampForDelegates`** — Live-Vertretung beim Stempeln produktiv gewünscht (dann verdrahten) oder Altlast (dann löschen)? Aktuell toter Code.
-2. **Diagnose-Tab** (bei Timo als „temporär" beschriftet) — mitnehmen oder auslassen?
-3. **Materialverbrauch in der Mitarbeiteransicht** — bleibt dauerhaft draußen, oder später *optional* (freiwillig, nicht blockierend beim Ausstempeln)?
-4. **Ist `Vehicle.hourlyRate` ein Kosten- oder ein Verrechnungssatz?** Für „Maschinen und Stunden" in der Nachkalkulation braucht es beides getrennt: was die Maschine kostet und was dem Kunden berechnet wird. Steht heute nur ein Feld zur Verfügung. Zwei Wege: zweites Feld `costRate` in `Vehicle` ergänzen, oder `hourlyRate` als Verrechnungssatz festlegen und die Kostenseite über einen Prozentsatz schätzen. Ersteres ist sauberer, kostet aber Pflegeaufwand je Maschine.
+1. **Ist `Vehicle.hourlyRate` ein Kosten- oder ein Verrechnungssatz?** Für „Maschinen und Stunden" in der Nachkalkulation braucht es beides getrennt: was die Maschine kostet und was dem Kunden berechnet wird. Heute gibt es nur ein Feld. Zwei Wege: zweites Feld `costRate` in `Vehicle` ergänzen (sauberer, aber Pflegeaufwand je Maschine), oder `hourlyRate` als Verrechnungssatz festlegen und die Kostenseite über einen Prozentsatz schätzen.
+
+Damit ist der Plan entscheidungsreif. Umsetzung kann mit Phase 0 beginnen.
