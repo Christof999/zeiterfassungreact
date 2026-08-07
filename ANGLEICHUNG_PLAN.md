@@ -14,6 +14,21 @@ Dieses Dokument liegt identisch in `zeiterfassungreact` und `Rechnungsprogramm`.
 
 **HERO entfällt vollständig.** Keine `lib/hero/*`, keine `api/hero/*`, kein `heroService.ts`, kein `HeroIntegrationTab`, keine `hero*`-Felder in den Typen. Wo Timo-Code HERO referenziert (z. B. `Project.offerPositions` stammt dort aus dem HERO-Angebot), wird die Quelle durch das **Angebot aus dem Rechnungsprogramm** ersetzt — die Datenstruktur bleibt, der Lieferant wechselt.
 
+## Entschieden (Nachtrag, 07.08.2026)
+
+**Agentenmodus: ja — und bei Lauffer geräteabhängig statt rollenabhängig.**
+Bei Timo entscheidet die Benutzerrolle, wer im geführten KI-Chat landet. Bei Lauffer
+soll sich der Agentenmodus **auf dem Handy automatisch öffnen**, am Rechner startet
+weiterhin das volle Programm. Details in Phase 10.
+
+**Word bleibt, PDF kommt dazu.** Beide Ausgabewege dauerhaft nebeneinander.
+
+**Artikelstamm: Lauffer trennt Dienstleistung und Material.** Nicht bloß andere
+Kategorienamen — eine Zweiteilung des Stamms. Das greift direkt in Phase 1 ein
+(siehe Kasten dort) und ersetzt Timos Kategorie-Einrichtungshilfe.
+
+**Beleg-Editor und Rechenlogik werden vollständig übernommen.**
+
 ---
 
 ## 0. Ausgangslage
@@ -221,7 +236,7 @@ keiner Timo-Komponente benutzt und können entfallen.
 | grünes Fliesenleger-Briefpapier-Layout im PDF | eigenes Layout; nur die *Struktur* übernehmen |
 | HERO-ERP (`lib/hero/*`, `api/hero/*`, `heroService.ts`, `HeroIntegrationTab`, `constants/heroIntegration.ts`, `services/data/hero.ts`, alle `hero*`-Felder) | **entschieden: entfällt** |
 | Benutzer „Timo", „Albert", „Petra" in `authService.ts` | fremde Stammdaten — Lauffer behält Paul und Christof |
-| Kategorien „Bauchemie / Fliesen" als Vorgabe im Artikelstamm | Gartenbau braucht eigene Kategorien |
+| Kategorie-Einrichtungshilfe „Bauchemie / Fliesen / Sonstiges" | Lauffer trennt stattdessen Dienstleistung und Material (Phase 9d) |
 | „Facharbeiter" / „Facharbeiter B" als feste Satzbezeichnungen | Timo-Nomenklatur aus deren Angeboten |
 | Entfernung der Maschinen-Funktion | siehe 2.3 |
 | Materialpflicht beim Ausstempeln in der Mitarbeiteransicht | ausdrücklicher Wunsch |
@@ -268,13 +283,35 @@ Erster Teil der Kommunikation und Grundlage für alles Weitere. Material entsteh
 hier **nur als Stammdatum im Admin-Bereich** — die Mitarbeiteransicht bekommt davon
 nichts zu sehen (siehe Kasten am Ende des Zeiterfassungsblocks).
 
+> ⚠️ **Dienstleistung darf nicht als Material in der Zeiterfassung landen.**
+>
+> Der gemeinsame Stamm bedeutet: jeder Artikel des Rechnungsprogramms liegt in
+> `materialTypes` der Zeiterfassungs-Firebase. Timos `getActiveMaterialTypes()`
+> filtert dabei ausschließlich nach `isActive` und nicht-leerem Namen — es gibt
+> **kein Feld, das Material von Leistung unterscheidet**. Bei einem Fliesenleger
+> fällt das nicht auf, weil dort fast jede Position Material ist. Bei Lauffer
+> würden Pflanz-, Erd- und Stundenlohnarbeiten die Materialauswahl fluten und die
+> Material-Nachkalkulation verfälschen.
+>
+> **Lösung:** ein Feld `kind: 'material' | 'service'` am Artikel bzw. `MaterialType`,
+> von Anfang an mitgeführt. Nur `material` wird in der Zeiterfassung als buchbares
+> Material angeboten und in die Material-Nachkalkulation gerechnet;
+> Dienstleistungspositionen laufen über die Lohnseite. Das passt zu Timos bereits
+> vorhandenem `OfferPosition.kind: 'material' | 'labor'` — die Unterscheidung gibt
+> es dort auf Angebotsebene, nur nicht in den Stammdaten.
+>
+> Das Feld muss **vor** der Migration stehen, sonst müssen hinterher hunderte
+> Datensätze von Hand einsortiert werden.
+
 - [ ] `zeiterfassungreact`: `MaterialType` + `MaterialCredit` + `TimeEntryMaterialUsage` in `types/index.ts`
+- [ ] **`kind: 'material' | 'service'`** in `MaterialType` (Zeiterfassung) und `Article` (Rechnungsprogramm); fehlender Wert gilt als `material` (abwärtskompatibel)
+- [ ] `getActiveMaterialTypes()` um `kind !== 'service'` erweitern — die eine Stelle, an der die Trennung wirkt
 - [ ] `zeiterfassungreact`: `services/data/materials.ts` portieren, in `dataService` einhängen
 - [ ] `zeiterfassungreact`: Admin-Tab **Material** (`MaterialTypesTab`, `MaterialTypeModal`) — nur Admin
 - [ ] `Rechnungsprogramm`: `timeTrackingFirebase.ts` um `getAuth` + `timeTrackingAuthReady` erweitern
 - [ ] `Rechnungsprogramm`: `articleService.ts` auf `materialTypes` in der Zeiterfassungs-Firebase umstellen, inkl. Cache und `getArticlesByIds()`
 - [ ] `Rechnungsprogramm`: `Article.purchasePrice` + `sortOrder`, `ArticleForm`/`Articles` erweitern
-- [ ] **Datenmigration** bestehender `articles` → `materialTypes` (Skript, einmalig, mit Trockenlauf)
+- [ ] **Datenmigration** bestehender `articles` → `materialTypes` (Skript, einmalig, mit Trockenlauf) — dabei jeden Artikel als `material` oder `service` einstufen; Vorschlag über die Einheit (Std/Stunde/pauschal → `service`), Ergebnis vor dem Schreiben zur Durchsicht ausgeben
 - [ ] Firestore-Rules der Zeiterfassung: Schreibrecht auf `materialTypes` für anonyme Auth
 
 ⚠️ Diese Phase verändert die Datenhaltung. Vorher Backup beider Firestores, Rollback-Pfad festhalten.
@@ -373,17 +410,35 @@ unterschiedlich.
 - [ ] Artikel und Standardtext direkt aus dem Editor anlegen
 - [ ] `RowActionsMenu` in `Invoices`, `Offers`, `Customers`, `Articles`, `DeliveryNotes`, `PerformanceSpecifications`
 
-**9d — Artikelstamm**
-- [ ] Spalten Verkauf / Einkauf / Marge (€ und %)
-- [ ] Kategorie-Einrichtung per Knopfdruck — **mit Lauffer-Kategorien**, nicht „Bauchemie / Fliesen"
+**9d — Artikelstamm: Dienstleistung und Material trennen**
+
+Lauffers Ansatz ist ein anderer als Timos. Statt Warenkategorien („Bauchemie /
+Fliesen / Sonstiges") gibt es die Zweiteilung **Dienstleistung vs. Material**.
+Timos Kategorie-Einrichtungshilfe wird dadurch nicht angepasst, sondern **ersetzt**.
+
+- [ ] Umschalter Material / Dienstleistung in `ArticleForm`, gespeichert als `kind` (Feld kommt aus Phase 1)
+- [ ] Filter bzw. getrennte Ansicht in `Articles.tsx` — Material und Leistungen sind unterschiedliche Arbeitsvorgänge
+- [ ] Spalten Verkauf / Einkauf / Marge (€ und %) — bei Dienstleistungen ist Einkauf meist leer, die Marge-Spalte muss das aushalten und leer bleiben statt 100 % anzuzeigen
+- [ ] Sichtbar machen, dass nur Material in der Zeiterfassung buchbar ist (kurzer Hinweis am Umschalter)
+- [ ] Timos Kategorie-Einrichtungshilfe **nicht** übernehmen
 
 ### Phase 10 — Rechnungsprogramm: Ausgabe & Assistent
 - [ ] `utils/timeFormat.ts` (`isHourUnit`, `formatHoursMinutes`) — Stunden als `7:30` statt `7,5`
 - [ ] `pdfExport.ts` neu aufbauen: **Struktur** von Timo (Angebot + LV + Rechnung, Rabatt/Aufschlag in Euro, Stundenformat, § 14 UStG, mehrseitige Fußzeile), **Layout und Daten** von Lauffer aus `companyProfile`/`CompanyData`
 - [ ] PDF-Vorschau mit „VORSCHAU"-Wasserzeichen aus dem ungespeicherten Formularstand
 - [ ] `utils/imageInput.ts`
-- [ ] Benutzerrollen `admin` / `agent` in `authService` — Paul und Christof bleiben, Timos Benutzer nicht übernehmen
-- [ ] Agentenmodus `pages/Agent/AgentMode.tsx` + `assistantConversationService.ts` + Route `/agent`; `AssistantButton` im Agentenmodus ausblenden
+**Agentenmodus — bei Lauffer geräteabhängig**
+
+Timo steuert den Agentenmodus über die Benutzerrolle. Lauffer will ihn **am Handy
+automatisch**, am Rechner nicht. Das ist eine andere Weiche vor demselben Bildschirm:
+
+- [ ] `pages/Agent/AgentMode.tsx` + `assistantConversationService.ts` + Route `/agent` portieren
+- [ ] `AssistantButton` im Agentenmodus ausblenden (Timo prüft dafür `location.pathname !== '/agent'`)
+- [ ] **Automatische Weiche am Handy**: nach dem Anmelden auf `/agent` statt aufs Dashboard, wenn es ein kleines Gerät ist
+  - Erkennung über `matchMedia('(max-width: 768px)')` in Kombination mit `(pointer: coarse)` — **kein User-Agent-Sniffing**, das altert schlecht und liegt bei Tablets daneben
+  - Nur beim **Anmelden** greifen, nicht bei jeder Bildschirmdrehung — sonst wirft es den Benutzer mitten in der Arbeit aus dem Formular
+- [ ] **Ausweg muss es geben**: sichtbarer Wechsel „Zum vollen Programm" im Agentenmodus, die Wahl in `localStorage` merken und ab dann respektieren. Ohne das ist die Rechnungsbearbeitung am Handy gar nicht mehr erreichbar.
+- [ ] Benutzerrollen `admin` / `agent` in `authService` trotzdem übernehmen — Paul und Christof bleiben, Timos Benutzer nicht. Rolle und Gerät wirken zusammen: Rolle `agent` heißt immer Agentenmodus, `admin` am Handy heißt Agentenmodus mit Ausweg.
 - [ ] `assistantService.ts` mergen: `vorschlag_dokument` / `DocumentProposal` / `createDocumentFromProposal`, `createReviewTaskIfAgent`, Tools für Standardtexte und Nachkalkulation
 - [ ] Performance: Artikel- und Projekt-Cache, `getArticlesByIds`, `getInvoices({ limit })`, `getOffers({ limit })`
 - [ ] `DynamicValue` / `DynamicRecord` flächendeckend statt `any`
@@ -404,6 +459,8 @@ unterschiedlich.
 | **Maschinen gehen beim Portieren verloren** | Die sechs Merge-Dateien aus 2.3 nie kopieren, immer mergen. In Phase 11 gezielt gegen Maschinenbuchungen testen. |
 | **Word- und PDF-Ausdruck driften auseinander**, sobald es Textbausteine, optionale Zeilen und Aufschläge gibt | In Phase 9a beide Exportwege gemeinsam anpassen, nie nur einen |
 | **Rechenreihenfolge ändert sich still**: `computeLineNetTotal` rechnet Aufschlag vor Rabatt, feste Beträge zeilenweise statt pro Einheit | Bestehende Belege vor und nach der Umstellung gegenrechnen; alte Belege dürfen ihre Summe nicht ändern |
+| **Dienstleistungen fluten die Materialauswahl der Zeiterfassung** | `kind: 'material' \| 'service'` in Phase 1 anlegen, *bevor* migriert wird; `getActiveMaterialTypes()` filtert darauf |
+| **Agentenmodus am Handy sperrt den Zugang zum vollen Programm aus** | Sichtbarer Wechsel plus gemerkte Entscheidung; Weiche greift nur beim Anmelden, nicht bei Größenänderung |
 | **Artikel→Material-Migration** verliert Daten oder Kategoriebezüge | Backup, Trockenlauf, Kategorien bleiben in der Rechnungsprogramm-Firebase (wie bei Timo) |
 | **Schreibzugriff über Projektgrenze** scheitert an den Rules | Anonyme Auth muss in der Zeiterfassungs-Firebase aktiviert sein; `timeTrackingAuthReady` protokolliert Fehlschläge, Lesen funktioniert weiter |
 | **Zwei Stundenbegriffe** (gerundet vs. ungerundet) verwirren im Übergang | `timeRounding.ts` in Phase 0 in **beide** Repos, bevor irgendeine Auswertung umgestellt wird |
@@ -412,12 +469,14 @@ unterschiedlich.
 
 ## 7. Offene Fragen
 
-Geklärt: HERO entfällt · DATEV ist Priorität ② · Krankheitstage sind Priorität ③.
+Geklärt: HERO entfällt · DATEV ② · Krankheitstage ③ · Agentenmodus ja, am Handy
+automatisch · Word bleibt, PDF dazu · Artikelstamm trennt Dienstleistung und
+Material · Beleg-Editor und Rechenlogik werden übernommen.
 
 Noch offen:
 
 1. **`stampForDelegates`** — Live-Vertretung beim Stempeln produktiv gewünscht (dann verdrahten) oder Altlast (dann löschen)? Aktuell toter Code.
 2. **Diagnose-Tab** (bei Timo als „temporär" beschriftet) — mitnehmen oder auslassen?
 3. **Materialverbrauch in der Mitarbeiteransicht** — bleibt dauerhaft draußen, oder später *optional* (freiwillig, nicht blockierend beim Ausstempeln)?
-4. **Kategorien im Artikelstamm** — welche Standardkategorien soll die Einrichtungshilfe für Gartenbau anlegen?
-5. **Agentenmodus im Rechnungsprogramm** (geführter KI-Chat mit Prüfaufgaben statt Direktausführung) — für Lauffer überhaupt gewünscht, oder Phase 10 ohne diesen Teil?
+4. **Dienstleistungen in der Nachkalkulation** — laufen sie rein über die Lohnseite (Stunden × Verrechnungssatz), oder soll eine Dienstleistungsposition mit Festpreis als eigene Erlöszeile erscheinen? Betrifft `utils/nachkalkulation.ts` in Phase 2.
+5. **Agentenmodus am Tablet** — kleines Gerät im Sinne der Weiche, oder volles Programm? Die vorgeschlagene Erkennung (`max-width: 768px` + `pointer: coarse`) lässt Tablets im Querformat beim vollen Programm.
