@@ -331,6 +331,37 @@ Der zweite Teil der Kommunikation. Setzt Phase 1 voraus.
 - [ ] `projectExtrasService.ts` portieren (Ist-Material aus `timeEntries.materialUsages` + `materialCredits`, Berichte, Fotos)
 - [ ] `costCalculationService.ts` mergen: 15-Min-Rundung, `pauseTotalTime`, `resolveEmployeeRates` (Lohn vs. Vollkostensatz), Azubi-Logik — **`machineTimes` unverändert erhalten**
 - [ ] `utils/nachkalkulation.ts` + `NachkalkulationPanel.tsx` portieren (Maschinen-Sektion ist enthalten, Zeilen 537–560)
+
+> 🐞 **Vorher einen Fehler beheben: Maschinenkosten sind heute immer 0 €.**
+>
+> `costCalculationService.ts` liest den Maschinen-Stundensatz ausschließlich aus dem
+> Buchungsdokument (`data.costPerHour || data.kostenProStunde || data.hourlyRate || data.rate`).
+> `VehicleUsage` trägt aber **gar keinen Satz** — die Zeiterfassung denormalisiert
+> beim Buchen nur `vehicleName`. Der Satz steht auf `Vehicle.hourlyRate` in der
+> Collection `vehicles`, und auf die wird **nie zugegriffen** (`grep 'vehicles'` im
+> Service liefert nichts). Ergebnis: `costPerHour` = 0, `totalCost` = 0.
+> Maschinenstunden erscheinen in der Tabelle, die Kosten bleiben leer.
+>
+> Bei den Mitarbeitern ist derselbe Join korrekt gebaut (`employeesMap` aus der
+> `employees`-Collection) — bei den Maschinen fehlt er schlicht.
+>
+> - [ ] `vehicles`-Collection laden und als `vehiclesMap` beim Aggregieren joinen, analog zu `employeesMap`
+> - [ ] Satz aus der Buchung hat Vorrang, `Vehicle.hourlyRate` ist der Rückfall
+> - [ ] `hoursUsed` als Stundenquelle gleichwertig zu `hours` behandeln
+> - [ ] Gegen ein echtes Projekt mit Maschinenbuchungen prüfen: die Kostenspalte muss Werte zeigen
+
+**Maschinen als eigene Sektion, nicht nur als Kostenposten**
+
+Timos Nachkalkulation behandelt Maschinen stiefmütterlich, weil ein Fliesenleger
+kaum welche verrechnet: `nachkalkulation.ts` enthält **keine einzige** Zeile zu
+Maschinen, das Panel zeigt nur eine Kostentabelle, und die Typen
+`LaborContribution.machineCostNet` / `ContributionMargin` sind zwar deklariert,
+werden aber **nirgends gebaut** — toter Code. Für Lauffer, wo Maschinenstunden ein
+eigener Erlösträger sind, reicht das nicht.
+
+- [ ] Maschinen als gleichrangige dritte Sektion neben Stunden und Material: Menge (Std), Kostensatz, Verrechnungssatz, Erlös, Kosten, Ergebnis
+- [ ] Verrechnungssatz für Maschinen klären und in `Vehicle` pflegbar machen — heute gibt es nur `hourlyRate`, ohne dass festgelegt wäre, ob das Kosten oder Erlös sind (siehe offene Frage 4)
+- [ ] Die toten Typen `LaborContribution` / `ContributionMargin` / `MaterialProfitSummary` entweder ausbauen und tatsächlich befüllen oder nicht mitportieren — nicht als Karteileichen übernehmen
 - [ ] `CompanyData.defaultHourlyRate` + Feld auf der Setup-Seite
 - [ ] Mitarbeiterfelder in der Zeiterfassung, die die Nachkalkulation braucht: `hourlyCostRate`, `ancillaryWageCosts`, `isApprentice`, `fixedMonthlySalary` in `EmployeeModal`
 - [ ] Projekt-Autovorschlag über den Kundennamen bei neuer Rechnung
@@ -434,9 +465,11 @@ automatisch**, am Rechner nicht. Das ist eine andere Weiche vor demselben Bildsc
 
 - [ ] `pages/Agent/AgentMode.tsx` + `assistantConversationService.ts` + Route `/agent` portieren
 - [ ] `AssistantButton` im Agentenmodus ausblenden (Timo prüft dafür `location.pathname !== '/agent'`)
-- [ ] **Automatische Weiche am Handy**: nach dem Anmelden auf `/agent` statt aufs Dashboard, wenn es ein kleines Gerät ist
-  - Erkennung über `matchMedia('(max-width: 768px)')` in Kombination mit `(pointer: coarse)` — **kein User-Agent-Sniffing**, das altert schlecht und liegt bei Tablets daneben
-  - Nur beim **Anmelden** greifen, nicht bei jeder Bildschirmdrehung — sonst wirft es den Benutzer mitten in der Arbeit aus dem Formular
+- [ ] **Automatische Weiche am Handy**: nach dem Anmelden auf `/agent` statt aufs Dashboard, wenn es ein Handy ist
+  - **Tablets zählen nicht als Handy** — sie bekommen das volle Programm.
+  - Erkennung über `matchMedia('(max-width: 640px) and (pointer: coarse)')` — **kein User-Agent-Sniffing**, das altert schlecht.
+  - ⚠️ Schwelle bewusst 640px, **nicht** 768px: ein iPad im Hochformat ist exakt 768px breit und würde bei `max-width: 768px` mit eingefangen. Handys liegen bei 360–430px, 640px hält sicheren Abstand nach beiden Seiten.
+  - Nur beim **Anmelden** greifen, nicht bei jeder Bildschirmdrehung — sonst wirft es den Benutzer mitten in der Arbeit aus dem Formular.
 - [ ] **Ausweg muss es geben**: sichtbarer Wechsel „Zum vollen Programm" im Agentenmodus, die Wahl in `localStorage` merken und ab dann respektieren. Ohne das ist die Rechnungsbearbeitung am Handy gar nicht mehr erreichbar.
 - [ ] Benutzerrollen `admin` / `agent` in `authService` trotzdem übernehmen — Paul und Christof bleiben, Timos Benutzer nicht. Rolle und Gerät wirken zusammen: Rolle `agent` heißt immer Agentenmodus, `admin` am Handy heißt Agentenmodus mit Ausweg.
 - [ ] `assistantService.ts` mergen: `vorschlag_dokument` / `DocumentProposal` / `createDocumentFromProposal`, `createReviewTaskIfAgent`, Tools für Standardtexte und Nachkalkulation
@@ -460,7 +493,8 @@ automatisch**, am Rechner nicht. Das ist eine andere Weiche vor demselben Bildsc
 | **Word- und PDF-Ausdruck driften auseinander**, sobald es Textbausteine, optionale Zeilen und Aufschläge gibt | In Phase 9a beide Exportwege gemeinsam anpassen, nie nur einen |
 | **Rechenreihenfolge ändert sich still**: `computeLineNetTotal` rechnet Aufschlag vor Rabatt, feste Beträge zeilenweise statt pro Einheit | Bestehende Belege vor und nach der Umstellung gegenrechnen; alte Belege dürfen ihre Summe nicht ändern |
 | **Dienstleistungen fluten die Materialauswahl der Zeiterfassung** | `kind: 'material' \| 'service'` in Phase 1 anlegen, *bevor* migriert wird; `getActiveMaterialTypes()` filtert darauf |
-| **Agentenmodus am Handy sperrt den Zugang zum vollen Programm aus** | Sichtbarer Wechsel plus gemerkte Entscheidung; Weiche greift nur beim Anmelden, nicht bei Größenänderung |
+| **Agentenmodus am Handy sperrt den Zugang zum vollen Programm aus** | Sichtbarer Wechsel plus gemerkte Entscheidung; Weiche greift nur beim Anmelden, nicht bei Größenänderung; Schwelle 640px hält Tablets draußen |
+| **Maschinenkosten bleiben nach dem Port weiter 0 €** | Der fehlende Join auf `vehicles` ist ein Altbestand, kein Porting-Fehler — in Phase 2 zuerst beheben, dann portieren, sonst wandert der Fehler in die neue Ansicht mit |
 | **Artikel→Material-Migration** verliert Daten oder Kategoriebezüge | Backup, Trockenlauf, Kategorien bleiben in der Rechnungsprogramm-Firebase (wie bei Timo) |
 | **Schreibzugriff über Projektgrenze** scheitert an den Rules | Anonyme Auth muss in der Zeiterfassungs-Firebase aktiviert sein; `timeTrackingAuthReady` protokolliert Fehlschläge, Lesen funktioniert weiter |
 | **Zwei Stundenbegriffe** (gerundet vs. ungerundet) verwirren im Übergang | `timeRounding.ts` in Phase 0 in **beide** Repos, bevor irgendeine Auswertung umgestellt wird |
@@ -470,13 +504,13 @@ automatisch**, am Rechner nicht. Das ist eine andere Weiche vor demselben Bildsc
 ## 7. Offene Fragen
 
 Geklärt: HERO entfällt · DATEV ② · Krankheitstage ③ · Agentenmodus ja, am Handy
-automatisch · Word bleibt, PDF dazu · Artikelstamm trennt Dienstleistung und
-Material · Beleg-Editor und Rechenlogik werden übernommen.
+automatisch, **Tablet bekommt das volle Programm** · Word bleibt, PDF dazu ·
+Artikelstamm trennt Dienstleistung und Material · Beleg-Editor und Rechenlogik
+werden übernommen · **Nachkalkulation führt Maschinen und Stunden**.
 
 Noch offen:
 
 1. **`stampForDelegates`** — Live-Vertretung beim Stempeln produktiv gewünscht (dann verdrahten) oder Altlast (dann löschen)? Aktuell toter Code.
 2. **Diagnose-Tab** (bei Timo als „temporär" beschriftet) — mitnehmen oder auslassen?
 3. **Materialverbrauch in der Mitarbeiteransicht** — bleibt dauerhaft draußen, oder später *optional* (freiwillig, nicht blockierend beim Ausstempeln)?
-4. **Dienstleistungen in der Nachkalkulation** — laufen sie rein über die Lohnseite (Stunden × Verrechnungssatz), oder soll eine Dienstleistungsposition mit Festpreis als eigene Erlöszeile erscheinen? Betrifft `utils/nachkalkulation.ts` in Phase 2.
-5. **Agentenmodus am Tablet** — kleines Gerät im Sinne der Weiche, oder volles Programm? Die vorgeschlagene Erkennung (`max-width: 768px` + `pointer: coarse`) lässt Tablets im Querformat beim vollen Programm.
+4. **Ist `Vehicle.hourlyRate` ein Kosten- oder ein Verrechnungssatz?** Für „Maschinen und Stunden" in der Nachkalkulation braucht es beides getrennt: was die Maschine kostet und was dem Kunden berechnet wird. Steht heute nur ein Feld zur Verfügung. Zwei Wege: zweites Feld `costRate` in `Vehicle` ergänzen, oder `hourlyRate` als Verrechnungssatz festlegen und die Kostenseite über einen Prozentsatz schätzen. Ersteres ist sauberer, kostet aber Pflegeaufwand je Maschine.
