@@ -4,6 +4,16 @@ Stand: 07.08.2026 · Branch `claude/repository-comparison-alignment-lz922s`
 
 Dieses Dokument liegt identisch in `zeiterfassungreact` und `Rechnungsprogramm`.
 
+## Entschieden (Vorgabe Christof, 07.08.2026)
+
+**Priorität für Lauffer, in dieser Reihenfolge:**
+
+1. **Kommunikation zum Rechnungsprogramm** — gemeinsamer Materialstamm, Angebot → Projekt, Ist-Rückkanal, identische Stundenrechnung
+2. **DATEV in der Zeiterfassung**
+3. **Krankheitstage in der Zeiterfassung**
+
+**HERO entfällt vollständig.** Keine `lib/hero/*`, keine `api/hero/*`, kein `heroService.ts`, kein `HeroIntegrationTab`, keine `hero*`-Felder in den Typen. Wo Timo-Code HERO referenziert (z. B. `Project.offerPositions` stammt dort aus dem HERO-Angebot), wird die Quelle durch das **Angebot aus dem Rechnungsprogramm** ersetzt — die Datenstruktur bleibt, der Lieferant wechselt.
+
 ---
 
 ## 0. Ausgangslage
@@ -120,6 +130,22 @@ Gute Nachricht auf der Rechnungsseite: `Timo_Rechnungsprogramm` hat `MachineTime
 
 ## 3. Rechnungsprogramm: `Rechnungsprogramm` vs. `Timo_Rechnungsprogramm`
 
+> **Kurzantwort: ja, hier liegt sogar mehr als in der Zeiterfassung.** Der reine
+> Zeilenzuwachs (27.787 → 33.290) untertreibt: `InvoiceForm.tsx` (+1.009 Diff-Zeilen),
+> `OfferForm.tsx` (+705) und `pdfExport.ts` (195 → 906 Zeilen) sind praktisch
+> Neubauten. Dazu kommen 11 Dateien, die es bei Lauffer gar nicht gibt.
+
+### 3.0 Gute Nachricht vorweg: kein CSS-Aufwand
+
+`src/index.css`, `postcss.config.js`, `vite.config.ts`, `tsconfig.json` und
+`src/config.ts` sind zwischen beiden Repos **byte-identisch**. `tailwind.config.js`
+verwendet in beiden Repos **dieselben Token-Namen** (`lauffer-green`, `lauffer-grey`,
+`lauffer-brown`, `primary`) — Timo hat nur die Farbwerte auf Petrol-Grün `#457B69`
+umgestellt, das Fork-Vokabular aber nie umbenannt. Jede aus der Timo-Linie
+übernommene Komponente rendert in Lauffer-Grün, ohne dass eine Zeile CSS angefasst
+werden muss. Die zwei zusätzlichen Token `lauffer-red` / `lauffer-yellow` werden von
+keiner Timo-Komponente benutzt und können entfallen.
+
 ### 3.1 Was Timo voraus hat (zu übernehmen)
 
 **Belegerfassung**
@@ -128,6 +154,34 @@ Gute Nachricht auf der Rechnungsseite: `Timo_Rechnungsprogramm` hat `MachineTime
 - **Aufschläge** (`Surcharge`) analog zu Rabatten, auf Positionsebene, auch in Angeboten (`OfferLine.discount` / `surcharge` fehlt bei Lauffer ganz).
 - **Artikel-Palette + Drag&Drop** (`ArticlePalette.tsx`, `ArticleDropZone.tsx`, `dragConstants.ts`), `CollapsibleLineRow.tsx`, `LineAdjustmentFields.tsx`, `RowActionsMenu.tsx`, `useUndoableState.ts` (Undo/Redo).
 - **Baustellenadresse** `Customer.siteAddress` getrennt von der Rechnungsanschrift (Grundlage des Zeiterfassungsprojekts), `utils/addresses.ts`.
+
+**Bedienung des Beleg-Editors** — das ist der Bereich mit dem größten spürbaren Unterschied:
+- **Undo/Redo** über `useUndoableState.ts` — versehentlich gelöschte oder geänderte Positionen sind wiederherstellbar; laufende Preiseingaben werden beim Zurückspringen verworfen.
+- **Zusammenklappbare Positionszeilen** (`CollapsibleLineRow`) mit „alle auf-/zuklappen"; neue Zeilen öffnen sich automatisch, damit Artikelwahl und Details erreichbar sind.
+- **Laufende Positionsnummern**, wobei Überschriften und Textbausteine keine Nummer bekommen (`isSectionLine`).
+- **Artikel per Drag & Drop** aus der Palette an eine bestimmte Position einfügen, nicht nur ans Ende (`ArticlePalette` + `ArticleDropZone`).
+- **Artikel und Standardtext direkt aus dem Beleg-Editor anlegen** (`ArticleForm` / `StandardTextForm` als Modal im Formular) — kein Seitenwechsel mehr.
+- **PDF-Vorschau mit „VORSCHAU"-Wasserzeichen** aus dem ungespeicherten Formularstand, öffnet in neuem Tab.
+- **Kebab-Menü statt Icon-Reihe** in allen Listen (`RowActionsMenu`) — Anzeigen / Bearbeiten / Export / Löschen.
+
+**Rechenlogik** — hier ändert sich Verhalten, nicht nur Optik:
+- `computeLineNetTotal()` mit fester Reihenfolge **Grundbetrag → Aufschlag → Rabatt**; feste Beträge gelten für die ganze Zeile, nicht pro Einheit. Lauffer hat diese Funktion nicht und rechnet verstreut im Formular.
+- `optional` markierte Zeilen werden in `invoiceService` per `if (line.optional) return` aus der Summe genommen.
+- `adjustmentForFirestore()` verhindert, dass Nullrabatte und `undefined` in Firestore landen.
+- `isHourUnit` / `formatHoursMinutes`: Stundenpositionen werden als `7:30` statt `7,5` ausgewiesen — im PDF und auf dem Bildschirm.
+
+**Artikelstamm**
+- Spalten **Verkauf / Einkauf / Marge** (absolut und in %) — dieselbe Ansicht wie der Materialstamm der Zeiterfassung.
+- Einmalige Kategorie-Einrichtung per Knopfdruck: Standardkategorien anlegen und alle Artikel ohne Kategorie zuordnen. Timos Vorgaben sind „Bauchemie / Fliesen / Sonstiges" — für Lauffer durch eigene Kategorien zu ersetzen.
+
+**Benutzerrollen und Agentenmodus**
+- `authService` kennt `role: 'admin' | 'agent'`. Agent-Benutzer landen direkt im geführten KI-Chat statt im Programm.
+- `createReviewTaskIfAgent()`: was ein Agent-Benutzer auslöst, wird als Prüfaufgabe angelegt statt sofort ausgeführt.
+- Der Assistent kann komplette Belege vorschlagen (`vorschlag_dokument`, `DocumentProposal`, `createDocumentFromProposal`).
+- ⚠️ Die Benutzerliste ist hart kodiert. Timo hat `Paul` durch `Timo`, `Albert` und `Petra` ersetzt — **Lauffer behält Paul und Christof**, das Rollenkonzept wird ohne die fremden Benutzer übernommen.
+
+**Rechnung ↔ Projekt**
+- **Projekt-Autovorschlag**: bei einer neuen Rechnung wird anhand von Kundenname und Belegbezeichnung ein passendes Zeiterfassungs-Projekt vorgeschlagen (über den Namen, weil IDs systemübergreifend nicht matchen), bleibt manuell änderbar.
 
 **Nachkalkulation** — `NachkalkulationPanel.tsx` (720 Zeilen) + `utils/nachkalkulation.ts` (348) statt eines Inline-Blocks in `InvoiceForm.tsx`:
 - Soll/Ist-Vergleich Angebot ↔ Zeiterfassung (`ReconciliationLine`)
@@ -151,7 +205,9 @@ Gute Nachricht auf der Rechnungsseite: `Timo_Rechnungsprogramm` hat `MachineTime
 
 ### 3.2 Was `Rechnungsprogramm` voraus hat — behalten
 
-- **`utils/wordExport.ts`** inkl. `docx`, `docxtemplater`, `pizzip`, `file-saver` und den Anleitungen `WORD_TEMPLATE_ANLEITUNG.md`, `TEMPLATE_ANLEITUNG_POSITIONEN.md`, `TABELLE_FORMATIERUNG_ANLEITUNG.md`. Bei Timo ersatzlos gestrichen. Für Lauffer erhalten.
+- **Word-Export als Hauptausgabeweg.** `utils/wordExport.ts` inkl. `docx`, `docxtemplater`, `pizzip`, `file-saver` und den Anleitungen `WORD_TEMPLATE_ANLEITUNG.md`, `TEMPLATE_ANLEITUNG_POSITIONEN.md`, `TABELLE_FORMATIERUNG_ANLEITUNG.md`.
+
+  Das ist kein Nebenschauplatz: In `Invoices.tsx` heißt die Export-Funktion bei Lauffer `handleExportWord`, bei Timo `handleExportPdf` — Timo hat den Word-Weg **ersetzt**, nicht ergänzt. Für Lauffer bedeutet die Angleichung also: PDF **dazu**, Word bleibt. Beide Wege müssen die neuen Zeilentypen (`text`, `optional`, `surcharge`) beherrschen, sonst weichen Word- und PDF-Ausdruck derselben Rechnung voneinander ab.
 
 ---
 
@@ -163,8 +219,10 @@ Gute Nachricht auf der Rechnungsseite: `Timo_Rechnungsprogramm` hat `MachineTime
 | `logo-reisloehner.png`, `brand-logo.png` | Lauffer behält `logo-lauffer.png` / `logo.png` |
 | `APP_DISPLAY_NAME = 'Fliesen Reislöhner GmbH Zeiterfassung'` | Lauffer: „Lauffer Zeiterfassung / Gartenbau • Erdbau • Natursteinhandel" |
 | grünes Fliesenleger-Briefpapier-Layout im PDF | eigenes Layout; nur die *Struktur* übernehmen |
-| HERO-ERP (`lib/hero/*`, `api/hero/*`, `heroService.ts`, `HeroIntegrationTab`, alle `hero*`-Felder) | Lauffer nutzt HERO nicht |
-| Benutzer „Petra", Reislöhner-Mitarbeiterdaten | fremde Stammdaten |
+| HERO-ERP (`lib/hero/*`, `api/hero/*`, `heroService.ts`, `HeroIntegrationTab`, `constants/heroIntegration.ts`, `services/data/hero.ts`, alle `hero*`-Felder) | **entschieden: entfällt** |
+| Benutzer „Timo", „Albert", „Petra" in `authService.ts` | fremde Stammdaten — Lauffer behält Paul und Christof |
+| Kategorien „Bauchemie / Fliesen" als Vorgabe im Artikelstamm | Gartenbau braucht eigene Kategorien |
+| „Facharbeiter" / „Facharbeiter B" als feste Satzbezeichnungen | Timo-Nomenklatur aus deren Angeboten |
 | Entfernung der Maschinen-Funktion | siehe 2.3 |
 | Materialpflicht beim Ausstempeln in der Mitarbeiteransicht | ausdrücklicher Wunsch |
 
@@ -174,7 +232,27 @@ Gute Nachricht auf der Rechnungsseite: `Timo_Rechnungsprogramm` hat `MachineTime
 
 ## 5. Plan
 
-Reihenfolge nach Abhängigkeit. Jede Phase ist einzeln lauffähig und deploybar.
+Reihenfolge nach den gesetzten Prioritäten, innerhalb dessen nach technischer
+Abhängigkeit. Jede Phase ist einzeln lauffähig und deploybar.
+
+| Phase | Inhalt | Priorität |
+|---|---|---|
+| 0 | Fundament (Zeitrundung, Branding, Rules) | Voraussetzung |
+| 1 | **Gemeinsamer Materialstamm** | **① Kommunikation** |
+| 2 | **Angebot → Projekt → Ist-Rückkanal → Nachkalkulation** | **① Kommunikation** |
+| 3 | **DATEV-Bericht** | **②** |
+| 4 | **Krankheitstage** | **③** |
+| 5 | Zeiterfassung: Rechenkern & Berichte | danach |
+| 6 | Zeiterfassung: Admin & Stammdaten | danach |
+| 7 | Zeiterfassung: Überstunden | danach |
+| 8 | Zeiterfassung: Aufräumen | danach |
+| 9 | Rechnungsprogramm: Beleg-Editor | danach |
+| 10 | Rechnungsprogramm: Ausgabe & Assistent | danach |
+| 11 | Abschluss & Tests | Abschluss |
+
+Phase 1–4 decken die drei genannten Prioritäten ab und sind zusammen der erste
+sinnvolle Auslieferstand. Alles ab Phase 5 ist Angleichung ohne fachlichen
+Zeitdruck.
 
 ### Phase 0 — Fundament (beide Repos)
 - [ ] `utils/timeRounding.ts` in `zeiterfassungreact` **und** `Rechnungsprogramm` anlegen (identische Datei, aus der Timo-Linie)
@@ -184,7 +262,12 @@ Reihenfolge nach Abhängigkeit. Jede Phase ist einzeln lauffähig und deploybar.
 - [ ] `firestore.rules` in `zeiterfassungreact` anlegen und in `firebase.json` eintragen; Lauffer-Indizes (`vehicles`, `vehicleUsages`, `leaveRequests`) und die PDF-Erlaubnis in `storage.rules` **behalten**
 - [ ] `package.json` aufräumen (Build-Tooling nach `devDependencies`); `docx`-Kette in `Rechnungsprogramm` behalten
 
-### Phase 1 — Gemeinsamer Materialstamm (Grundlage für alles Weitere)
+### Phase 1 — Gemeinsamer Materialstamm ①
+
+Erster Teil der Kommunikation und Grundlage für alles Weitere. Material entsteht
+hier **nur als Stammdatum im Admin-Bereich** — die Mitarbeiteransicht bekommt davon
+nichts zu sehen (siehe Kasten am Ende des Zeiterfassungsblocks).
+
 - [ ] `zeiterfassungreact`: `MaterialType` + `MaterialCredit` + `TimeEntryMaterialUsage` in `types/index.ts`
 - [ ] `zeiterfassungreact`: `services/data/materials.ts` portieren, in `dataService` einhängen
 - [ ] `zeiterfassungreact`: Admin-Tab **Material** (`MaterialTypesTab`, `MaterialTypeModal`) — nur Admin
@@ -196,33 +279,69 @@ Reihenfolge nach Abhängigkeit. Jede Phase ist einzeln lauffähig und deploybar.
 
 ⚠️ Diese Phase verändert die Datenhaltung. Vorher Backup beider Firestores, Rollback-Pfad festhalten.
 
-### Phase 2 — Zeiterfassung: Rechenkern & Berichte
-- [ ] `utils/returnTravel.ts`, `utils/hoursInput.ts`, `utils/regularWorkTime.ts`, `utils/monthlyWorkedMinutes.ts` portieren (mit Tests)
-- [ ] `reports/`-Modulschnitt übernehmen: `reportUtils.ts`, `workTimeRules.ts`, `printHtml.ts`, `reportPdf.ts` — `reportCalc.ts` geht darin auf
+### Phase 2 — Kommunikation: Angebot → Projekt → Ist → Nachkalkulation ①
+
+Der zweite Teil der Kommunikation. Setzt Phase 1 voraus.
+
+**Hinweg (Rechnungsprogramm → Zeiterfassung)**
+- [ ] `Offer.timeTrackingProjectId` + `timeTrackingSyncedAt` in Typen und `offerService`
+- [ ] `Project.offerPositions[]` (`kind: 'material' | 'labor'`) + `offerMeta` in `zeiterfassungreact` — Quelle ist das **Angebot aus dem Rechnungsprogramm**, nicht HERO
+- [ ] Beim Annehmen eines Angebots ein Projekt in der Zeiterfassung anlegen und die Soll-Positionen mitschreiben
+- [ ] `Customer.siteAddress` + `utils/addresses.ts` — die Baustellenadresse wird der Projektname/-standort
+- [ ] `Invoice.offerId` / `offerNumber` beim Umwandeln Angebot → Rechnung mitschreiben
+
+**Rückweg (Zeiterfassung → Rechnungsprogramm)**
+- [ ] `projectExtrasService.ts` portieren (Ist-Material aus `timeEntries.materialUsages` + `materialCredits`, Berichte, Fotos)
+- [ ] `costCalculationService.ts` mergen: 15-Min-Rundung, `pauseTotalTime`, `resolveEmployeeRates` (Lohn vs. Vollkostensatz), Azubi-Logik — **`machineTimes` unverändert erhalten**
+- [ ] `utils/nachkalkulation.ts` + `NachkalkulationPanel.tsx` portieren (Maschinen-Sektion ist enthalten, Zeilen 537–560)
+- [ ] `CompanyData.defaultHourlyRate` + Feld auf der Setup-Seite
+- [ ] Mitarbeiterfelder in der Zeiterfassung, die die Nachkalkulation braucht: `hourlyCostRate`, `ancillaryWageCosts`, `isApprentice`, `fixedMonthlySalary` in `EmployeeModal`
+- [ ] Projekt-Autovorschlag über den Kundennamen bei neuer Rechnung
+- [ ] Alten Nachkalkulations-Block aus `InvoiceForm.tsx` entfernen
+
+**Nicht in dieser Phase:** `returnTravelCreditMs` (kommt mit Phase 5, die Rückfahrt-Gutschrift gibt es bei Lauffer noch nicht) — die Rundungsfunktion muss den fehlenden Wert als 0 behandeln.
+
+### Phase 3 — DATEV in der Zeiterfassung ②
+
+- [ ] `utils/hoursInput.ts` und `reports/reportUtils.ts` portieren — `datevReport.ts` baut darauf auf, `reportCalc.ts` (47 Zeilen) geht in `reportUtils.ts` (673) auf
+- [ ] `reports/workTimeRules.ts` + Tests (Pausenstaffel 6h/30min und 9h/45min, 10-Stunden-Kappung, 15-Minuten-Auszahlungsschritte) — die DATEV-Zahlen hängen daran
+- [ ] `reports/datevReport.ts` + `datevPrintHtml.ts`
+- [ ] Tab `reportsDatev` in `AdminDashboard.tsx` ergänzen (Merge, siehe 2.3)
+- [ ] `Employee.mealAllowanceRate` (Verpflegungsmehraufwand ab 8 Std) — geht in den DATEV-Export ein
+- [ ] Gegen einen echten Monat prüfen: DATEV-Summen müssen zum bestehenden Zeiterfassungsbericht passen
+
+### Phase 4 — Krankheitstage in der Zeiterfassung ③
+
+Klein und unabhängig — kann jederzeit vorgezogen werden.
+
+- [ ] Krankmeldungs-Maske aus Timos `VacationTab.tsx` in Lauffers `VacationTab.tsx` einbauen: Mitarbeiter wählen, Zeitraum, direkt als genehmigt speichern
+- [ ] Krankheitstage in der Monatsauswertung und im Zeiterfassungsbericht als Abwesenheitsart ausweisen (`AbsenceKind: 'sick'` aus `reportUtils.ts`)
+- [ ] ⚠️ **Nur die Maske übernehmen.** Lauffers `VacationTab` hat 778 Zeilen gegen 390 bei Timo — Teamkalender, Admin-Anlage, Konfliktwarnungen und Kontenverwaltung dürfen dabei nicht verloren gehen.
+
+### Phase 5 — Zeiterfassung: Rechenkern & restliche Berichte
+- [ ] `utils/returnTravel.ts`, `utils/regularWorkTime.ts`, `utils/monthlyWorkedMinutes.ts` portieren (mit Tests)
+- [ ] `reports/printHtml.ts`, `reports/reportPdf.ts`
 - [ ] `ReportsTab.tsx` mergen: Timo-Struktur **plus** Lauffer-Spalten für Maschinenstunden und `documentationOnlyEntry`
-- [ ] DATEV-Bericht (`datevReport.ts`, `datevPrintHtml.ts`, Tab `reportsDatev`)
 - [ ] Berichtsversand als PDF: `reportMailService.ts` + `api/send-report.js` (Absender über den bestehenden Email-Proxy)
 - [ ] `TimeEntryReportModal`, `ReportAddEntryModal`, `EmployeeTimeEntriesSection`
 
-### Phase 3 — Zeiterfassung: Admin & Stammdaten
-- [ ] Kunden: `CustomersTab`, `CustomerModal`, `services/data/customers.ts`, `TimeEntry.customerId`
-- [ ] Mitarbeiter: `hourlyCostRate`, `ancillaryWageCosts`, `mealAllowanceRate`, `isApprentice`, `fixedMonthlySalary` in `EmployeeModal`
+### Phase 6 — Zeiterfassung: Admin & Stammdaten
+- [ ] Kunden: `CustomersTab`, `CustomerModal`, `services/data/customers.ts`, `TimeEntry.customerId` (Kleinauftrag ohne Projekt)
 - [ ] Admin-Rollen `full`/`payroll` (`adminRole.ts`) — Maschinen-Tab in der Rechteprüfung berücksichtigen
 - [ ] Dashboard-Widgets (`dashboard/`), `OverviewTab` bleibt als Fallback, bis alle Kacheln portiert sind
 - [ ] `AdminClockInModal`, `DailyReportModal`, `dailyReport.ts`
 - [ ] `SearchableSelect` + `ListSearch`-Angleichung
-- [ ] **`AdminDashboard.tsx` mergen** — `TabType` = Timo-Liste **+ `'vehicles'`**, `VehiclesTab` bleibt verdrahtet
-- [ ] Krankmeldungs-Maske aus Timos `VacationTab` in Lauffers (reichhaltigeren) `VacationTab` nachziehen — **nicht** umgekehrt
+- [ ] **`AdminDashboard.tsx` fertig mergen** — `TabType` = Timo-Liste **+ `'vehicles'`**, ohne `'hero'`, `VehiclesTab` bleibt verdrahtet
 
-### Phase 4 — Zeiterfassung: Überstunden
+### Phase 7 — Zeiterfassung: Überstunden
 - [ ] `overtimeBalance.ts`, `overtimeMonth.ts`, `overtimeReminder.ts` + Tests
 - [ ] `OvertimeSettlements.tsx`, Route `/overtime`, `services/data/overtimeSettlements.ts`, `overtimeBroadcast.ts`
 - [ ] `OvertimeReminderModal`, `api/push/overtime-reminder.js`
 - [ ] `LeaveRequest.type: 'overtime'`
 - [ ] `api/cron/auto-clockout.js` + `crons` in `vercel.json`
 
-### Phase 5 — Zeiterfassung: Aufräumen & Angleichen
-- [ ] `dataService.ts` nach `services/data/*` zerlegen (Modulschnitt von Timo, Maschinen-Methoden bleiben)
+### Phase 8 — Zeiterfassung: Aufräumen & Angleichen
+- [ ] `dataService.ts` nach `services/data/*` zerlegen (Modulschnitt von Timo **ohne** `hero.ts`, Maschinen-Methoden bleiben)
 - [ ] `agentService.ts` mergen: 19 gemeinsame + 7 Material-Tools + **7 Maschinen-Tools behalten**; Umbenennungen `werArbeitetHeute` → `heutigeArbeitszeiten`, `werIstEingestempelt` → `werArbeitetGerade` übernehmen
 - [ ] Onboarding-Screen mit Lauffer-Texten
 - [ ] `stampForDelegates.ts`: verdrahten oder entfernen — Entscheidung nötig
@@ -230,32 +349,46 @@ Reihenfolge nach Abhängigkeit. Jede Phase ist einzeln lauffähig und deploybar.
 
 **Mitarbeiteransicht bleibt unangetastet.** `ClockInForm`, `ClockOutForm`, `ExtendedClockOutModal`, `TimeTracking`, `ProjectSwitchModal`, `AppendDocumentationModal`, `RetroactiveDocumentationListModal`, `VehicleBookingModal` behalten Verhalten und Pflichtfelder von heute. `MaterialUsageFields` wird **nicht** eingebaut; kein Materialverbrauch zum Ausstempeln. Verbesserungen daraus (`SaveProgressOverlay`-Fortschritt, Offline-Queue-Feinschliff) nur, soweit sie die Bedienung nicht ändern.
 
-### Phase 6 — Rechnungsprogramm: Belegerfassung
-- [ ] `Surcharge`, `optional`, `DocumentLineKind: 'text'` in `types/index.ts`; `calculations.ts` und `documentLines.ts` nachziehen
-- [ ] Standardtexte: `standardTextService.ts`, `pages/StandardTexts/`, `StandardTextPicker`, `DocumentTextBlock`, Sidebar-Eintrag, `introText`/`closingText` in Rechnung/Angebot/LV
-- [ ] `CollapsibleLineRow`, `LineAdjustmentFields`, `RowActionsMenu`, `useUndoableState`
+### Phase 9 — Rechnungsprogramm: Beleg-Editor
+
+Der größte verbliebene Block. Reihenfolge innerhalb der Phase ist wichtig — die
+Rechenlogik muss vor der Oberfläche stehen, sonst rechnen alte und neue Zeilen
+unterschiedlich.
+
+**9a — Datenmodell und Rechenlogik zuerst**
+- [ ] `Surcharge`, `optional`, `DocumentLineKind: 'text'` in `types/index.ts`
+- [ ] `calculations.ts`: `calculateSurchargeAmount()` und `computeLineNetTotal()` (Grundbetrag → Aufschlag → Rabatt, feste Beträge zeilenweise)
+- [ ] `documentLines.ts`: `isTextDocumentLine`, `isSectionLine`, `adjustmentForFirestore`
+- [ ] `invoiceService`/`offerService`: `optional`-Zeilen aus den Summen nehmen, `discount`/`surcharge` in Angebotszeilen persistieren, Übernahme in `convertOfferToInvoice`
+- [ ] **Word- und PDF-Export gleichzeitig** auf die neuen Zeilentypen heben, sonst driften die beiden Ausdrucke auseinander
+
+**9b — Standardtexte**
+- [ ] `standardTextService.ts`, `pages/StandardTexts/`, Sidebar-Eintrag
+- [ ] `StandardTextPicker`, `DocumentTextBlock`, `introText`/`closingText` in Rechnung, Angebot und LV
+
+**9c — Editor-Bedienung**
+- [ ] `useUndoableState.ts` (Undo/Redo), `CollapsibleLineRow`, `LineAdjustmentFields`, `RowActionsMenu`
 - [ ] `ArticlePalette` + `ArticleDropZone` + `dragConstants`, `DraggableDocumentLine` mergen
-- [ ] `Customer.siteAddress` + `utils/addresses.ts`, `CustomerForm` erweitern
-- [ ] `OfferLine.discount` / `surcharge`, Übernahme in `convertOfferToInvoice`
+- [ ] Laufende Positionsnummern ohne Überschriften/Textbausteine, „alle auf-/zuklappen"
+- [ ] Artikel und Standardtext direkt aus dem Editor anlegen
+- [ ] `RowActionsMenu` in `Invoices`, `Offers`, `Customers`, `Articles`, `DeliveryNotes`, `PerformanceSpecifications`
 
-### Phase 7 — Rechnungsprogramm: Nachkalkulation
-- [ ] `utils/nachkalkulation.ts` und `components/Invoices/NachkalkulationPanel.tsx` portieren — Maschinen-Sektion ist enthalten und bleibt
-- [ ] `projectExtrasService.ts` (Ist-Material, Berichte, Fotos)
-- [ ] `costCalculationService.ts` mergen: 15-Min-Rundung, `returnTravelCreditMs`, `resolveEmployeeRates`, Azubi-Logik — `machineTimes` unverändert erhalten
-- [ ] `CompanyData.defaultHourlyRate` + Setup-Feld
-- [ ] `Invoice.offerId`/`offerNumber`, `Offer.timeTrackingProjectId`/`timeTrackingSyncedAt`
-- [ ] Angebot → Projekt in der Zeiterfassung anlegen inkl. `offerPositions[]`
-- [ ] Nachkalkulations-Block aus `InvoiceForm.tsx` entfernen, durch das Panel ersetzen
+**9d — Artikelstamm**
+- [ ] Spalten Verkauf / Einkauf / Marge (€ und %)
+- [ ] Kategorie-Einrichtung per Knopfdruck — **mit Lauffer-Kategorien**, nicht „Bauchemie / Fliesen"
 
-### Phase 8 — Rechnungsprogramm: Ausgabe & Assistent
-- [ ] `pdfExport.ts` neu aufbauen: Struktur von Timo (Angebot + LV + Rechnung, Rabatt/Aufschlag in Euro, Stundenformat, § 14 UStG), Layout und Daten von Lauffer aus `companyProfile`/`CompanyData`
-- [ ] `utils/timeFormat.ts`, `utils/imageInput.ts`
-- [ ] `wordExport.ts` unverändert erhalten und gegen die neuen Zeilentypen (`text`, `optional`, `surcharge`) absichern
-- [ ] Agentenmodus `pages/Agent/AgentMode.tsx` + `assistantConversationService.ts` + Route `/agent`
-- [ ] `assistantService.ts` mergen — Tools für Standardtexte und Nachkalkulation ergänzen
-- [ ] Performance: Caches, `getArticlesByIds`, `getOffers({ limit })`
+### Phase 10 — Rechnungsprogramm: Ausgabe & Assistent
+- [ ] `utils/timeFormat.ts` (`isHourUnit`, `formatHoursMinutes`) — Stunden als `7:30` statt `7,5`
+- [ ] `pdfExport.ts` neu aufbauen: **Struktur** von Timo (Angebot + LV + Rechnung, Rabatt/Aufschlag in Euro, Stundenformat, § 14 UStG, mehrseitige Fußzeile), **Layout und Daten** von Lauffer aus `companyProfile`/`CompanyData`
+- [ ] PDF-Vorschau mit „VORSCHAU"-Wasserzeichen aus dem ungespeicherten Formularstand
+- [ ] `utils/imageInput.ts`
+- [ ] Benutzerrollen `admin` / `agent` in `authService` — Paul und Christof bleiben, Timos Benutzer nicht übernehmen
+- [ ] Agentenmodus `pages/Agent/AgentMode.tsx` + `assistantConversationService.ts` + Route `/agent`; `AssistantButton` im Agentenmodus ausblenden
+- [ ] `assistantService.ts` mergen: `vorschlag_dokument` / `DocumentProposal` / `createDocumentFromProposal`, `createReviewTaskIfAgent`, Tools für Standardtexte und Nachkalkulation
+- [ ] Performance: Artikel- und Projekt-Cache, `getArticlesByIds`, `getInvoices({ limit })`, `getOffers({ limit })`
+- [ ] `DynamicValue` / `DynamicRecord` flächendeckend statt `any`
 
-### Phase 9 — Abschluss
+### Phase 11 — Abschluss
 - [ ] Ende-zu-Ende-Test: Angebot → Projekt → Stempeln inkl. **Maschinenbuchung** → Nachkalkulation mit Maschinenkosten → Rechnung
 - [ ] Regressionstest Mitarbeiteransicht: Ausstempeln ohne Materialangabe muss funktionieren
 - [ ] `npm run build` + `vitest` in beiden Repos grün
@@ -268,7 +401,9 @@ Reihenfolge nach Abhängigkeit. Jede Phase ist einzeln lauffähig und deploybar.
 
 | Risiko | Gegenmaßnahme |
 |---|---|
-| **Maschinen gehen beim Portieren verloren** | Die sechs Merge-Dateien aus 2.3 nie kopieren, immer mergen. In Phase 9 gezielt gegen Maschinenbuchungen testen. |
+| **Maschinen gehen beim Portieren verloren** | Die sechs Merge-Dateien aus 2.3 nie kopieren, immer mergen. In Phase 11 gezielt gegen Maschinenbuchungen testen. |
+| **Word- und PDF-Ausdruck driften auseinander**, sobald es Textbausteine, optionale Zeilen und Aufschläge gibt | In Phase 9a beide Exportwege gemeinsam anpassen, nie nur einen |
+| **Rechenreihenfolge ändert sich still**: `computeLineNetTotal` rechnet Aufschlag vor Rabatt, feste Beträge zeilenweise statt pro Einheit | Bestehende Belege vor und nach der Umstellung gegenrechnen; alte Belege dürfen ihre Summe nicht ändern |
 | **Artikel→Material-Migration** verliert Daten oder Kategoriebezüge | Backup, Trockenlauf, Kategorien bleiben in der Rechnungsprogramm-Firebase (wie bei Timo) |
 | **Schreibzugriff über Projektgrenze** scheitert an den Rules | Anonyme Auth muss in der Zeiterfassungs-Firebase aktiviert sein; `timeTrackingAuthReady` protokolliert Fehlschläge, Lesen funktioniert weiter |
 | **Zwei Stundenbegriffe** (gerundet vs. ungerundet) verwirren im Übergang | `timeRounding.ts` in Phase 0 in **beide** Repos, bevor irgendeine Auswertung umgestellt wird |
@@ -277,8 +412,12 @@ Reihenfolge nach Abhängigkeit. Jede Phase ist einzeln lauffähig und deploybar.
 
 ## 7. Offene Fragen
 
-1. **HERO** — bestätigt außen vor? Dann fallen auch `Project.heroProjectId`, `Employee.heroEmployeeId` usw. weg. Alternativ die Felder als Platzhalter mitnehmen, damit die Typen deckungsgleich bleiben.
-2. **Diagnose-Tab** (bei Timo „temporär") — mit übernehmen oder auslassen?
-3. **`stampForDelegates`** — Live-Vertretung produktiv gewünscht (dann verdrahten) oder Altlast (dann löschen)?
-4. **DATEV** — für Lauffer relevant, oder Phase 2 ohne DATEV?
-5. **Materialverbrauch für Lauffer**: bestätigt nur Admin/Nachkalkulation, Mitarbeiteransicht bleibt frei. Soll Material später wenigstens *optional* (freiwillig, nicht blockierend) in der Mitarbeiteransicht möglich sein?
+Geklärt: HERO entfällt · DATEV ist Priorität ② · Krankheitstage sind Priorität ③.
+
+Noch offen:
+
+1. **`stampForDelegates`** — Live-Vertretung beim Stempeln produktiv gewünscht (dann verdrahten) oder Altlast (dann löschen)? Aktuell toter Code.
+2. **Diagnose-Tab** (bei Timo als „temporär" beschriftet) — mitnehmen oder auslassen?
+3. **Materialverbrauch in der Mitarbeiteransicht** — bleibt dauerhaft draußen, oder später *optional* (freiwillig, nicht blockierend beim Ausstempeln)?
+4. **Kategorien im Artikelstamm** — welche Standardkategorien soll die Einrichtungshilfe für Gartenbau anlegen?
+5. **Agentenmodus im Rechnungsprogramm** (geführter KI-Chat mit Prüfaufgaben statt Direktausführung) — für Lauffer überhaupt gewünscht, oder Phase 10 ohne diesen Teil?
