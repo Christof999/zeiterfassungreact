@@ -83,20 +83,42 @@ stattdessen wird die Bedeutung im Typ dokumentiert.
 Referenz**. Kein Commit, kein Branch, kein Push. Geändert wird allein in
 `zeiterfassungreact` und `Rechnungsprogramm`.
 
-### Keine Zeitrundung, kein Fahrtzeitaufschlag
+### Keine Rundung in den Daten — im Ausdruck schon
 
-Lauffers Zeiterfassung **behält ihre heutige Rechnung**. Timos 15-Minuten-Raster
-(`roundTimeToStep`) und die Rückfahrt-Gutschrift (`returnTravelCreditMs`) werden
-**nicht** übernommen.
+Die Trennlinie verläuft zwischen **gespeicherten Daten** und **Darstellung**:
 
-Lauffers Formel bleibt, wie sie ist — minutengenau, aus `reportCalc.ts`:
+| Ebene | Regel |
+|---|---|
+| **Speicherung** (`timeEntries` in Firestore) | Bleibt wie heute. Minutengenau, keine gerundeten Werte, kein `returnTravelCreditMs`. Was der Mitarbeiter stempelt, steht so in der Datenbank. |
+| **Mitarbeiteransicht** | Unverändert. Kein Fahrtzeitaufschlag beim Ausstempeln. |
+| **DATEV-Ausdruck** | Darf runden und die gesetzliche Pausenstaffel anwenden — das ist eine Darstellungsfrage. |
+| **Nachkalkulation** (Rechnungsprogramm) | Rechnet mit den gespeicherten, minutengenauen Werten. Sie ist eine Kostenrechnung, kein Ausdruck. |
+
+Lauffers gespeicherte Formel bleibt damit unangetastet:
 
 ```
 Arbeitszeit = Gehen − Kommen − Pause
 ```
 
-Damit entfallen aus dem Plan: `utils/timeRounding.ts`, `utils/returnTravel.ts`
-und alles, was darauf aufbaut.
+**Das lässt sich sauber trennen** — geprüft:
+
+- `reportUtils.ts` und `workTimeRules.ts` enthalten **keinen einzigen Schreibzugriff**
+  (kein `updateDoc`, `setDoc`, `addDoc`, kein `DataService`). Es ist reine
+  Rechenlogik über bereits geladene Einträge, also von Natur aus eine
+  Darstellungsschicht. Sie können übernommen werden, ohne dass ein einziger
+  Datensatz anders gespeichert wird.
+- `returnTravel.ts` zerfällt in zwei Teile: `estimateReturnTravel()`,
+  `RETURN_HOME_BASE` und `formatReturnTravelCreditNote()` **erzeugen** den
+  Aufschlag beim Ausstempeln — die kommen **nicht** mit.
+  `getReturnTravelCreditMs()` **liest** nur ein gespeichertes Feld und liefert 0,
+  wenn es fehlt. Da Lauffer das Feld nie schreibt, ist der Wert dauerhaft 0.
+
+Übernommen wird deshalb **nur** `getReturnTravelCreditMs()` als kleiner Helfer,
+damit `reportUtils.ts` unverändert bleibt und bei künftigen Abgleichen mit Timo
+nicht auseinanderläuft.
+
+`utils/timeRounding.ts` wird für den Ausdruck mit übernommen, aber **nirgends auf
+dem Schreibpfad** verwendet.
 
 > **Das Ziel „beide Programme weisen dieselben Stunden aus" bleibt trotzdem
 > bestehen** — nur ist die gemeinsame Grundlage jetzt Lauffers minutengenaue
@@ -180,8 +202,8 @@ Die Doku `ZEITERFASSUNG_INTEGRATION.md` und `ZEITERFASSUNG_SECURITY_RULES.txt` s
 **Für Lauffer gilt davon:** Punkt 1, 2, 3, 5 und 8 unverändert. Punkt 4 kommt ohne
 die Verbrauchserfassung beim Ausstempeln (die Soll-Positionen wandern trotzdem ins
 Projekt, sie dienen der Angebots-/Rechnungsseite). Punkt 6 schrumpft auf Berichte
-und Fotos. Punkt 7 gilt als **Ziel**, aber mit Lauffers eigener Formel — ohne
-Rundung und ohne Fahrtzeit-Gutschrift.
+und Fotos. Punkt 7 gilt als **Ziel**: Nachkalkulation und Zeiterfassungsbericht
+weisen dieselben, minutengenauen Stunden aus. Gerundet wird allein im DATEV-Ausdruck.
 
 ---
 
@@ -210,8 +232,8 @@ Rundung und ohne Fahrtzeit-Gutschrift.
 | Konfigurierbares Dashboard (`dashboard/DashboardTab`, `widgetRegistry`, `AddWidgetModal`) | ✅ | ❌ (statischer `OverviewTab`) |
 | Admin-Rollen `full` / `payroll` (`adminRole.ts`) | ✅ | ❌ |
 | Admin stempelt ein (`AdminClockInModal`) | ✅ | ❌ |
-| Rückfahrtzeit-Gutschrift (`returnTravel.ts`, Radius-Staffel) | ✅ | ❌ — **bleibt so** (Nachtrag 4) |
-| Zeitrundung 15 Min (`timeRounding.ts`) | ✅ | ❌ — **bleibt so** (Nachtrag 4) |
+| Rückfahrtzeit-Gutschrift beim Ausstempeln (Radius-Staffel) | ✅ | ❌ — **bleibt so** (Nachtrag 4) |
+| Zeitrundung 15 Min (`timeRounding.ts`) | ✅ | ❌ in den Daten, **✅ im Ausdruck** (Nachtrag 4) |
 | Verpflegungsmehraufwand, Azubi-Fixlohn, Lohnnebenkosten | ✅ | ❌ |
 | Auto-Ausstempeln 17:00 (`api/cron/auto-clockout.js`) | ✅ | ❌ |
 | Onboarding-Screen | ✅ | ❌ |
@@ -325,7 +347,7 @@ keiner Timo-Komponente benutzt und können entfallen.
 - 60-Sekunden-Caches für Artikel und Zeiterfassungs-Projekte
 - `getOffers({ limit })`
 - `DynamicValue` / `DynamicRecord` statt `any` (ESLint-sauber)
-- `utils/imageInput.ts`, `utils/timeFormat.ts` (`timeRounding.ts` entfällt, Nachtrag 4)
+- `utils/imageInput.ts`, `utils/timeFormat.ts`
 
 ### 3.2 Was `Rechnungsprogramm` voraus hat — behalten
 
@@ -385,7 +407,7 @@ Zeitdruck.
 Betroffen sind ausschließlich `zeiterfassungreact` und `Rechnungsprogramm`.
 Keine Datenänderung, kein Risiko — deshalb der Anfang.
 
-- [ ] ~~`utils/timeRounding.ts` anlegen~~ — **entfällt** (Nachtrag 4: keine Rundung für Lauffer)
+- [ ] `utils/timeRounding.ts` kommt erst in Phase 3 (nur Berichts-/Druckstrecke, Nachtrag 4)
 - [ ] `constants/appBranding.ts` in `zeiterfassungreact`, Lauffer-Werte; alle hart verdrahteten Strings in `Login`, `AdminLogin`, `SplashScreen`, `TimeTracking`, `AdminDashboard`, `agentService` darauf umstellen
 - [ ] `utils/companyProfile.ts` in `Rechnungsprogramm` — Struktur von Timo, Werte **aus `CompanyData`** statt hart kodiert; Lücken über Setup-Seite pflegbar
 - [ ] `DynamicValue` / `DynamicRecord` in beide `types/index.ts`, `any` schrittweise ersetzen
@@ -527,44 +549,29 @@ eigener Erlösträger sind, reicht das nicht.
 - [ ] Projekt-Autovorschlag über den Kundennamen bei neuer Rechnung
 - [ ] Alten Nachkalkulations-Block aus `InvoiceForm.tsx` entfernen
 
-**Nicht übernommen:** `roundTimeToStep` und `returnTravelCreditMs`. Lauffer rechnet
-minutengenau `Gehen − Kommen − Pause`; die einzige Änderung am Rechnungsprogramm ist
-der Wechsel von `data.breaks` auf `pauseTotalTime` (Nachtrag 4).
+**Die Nachkalkulation rundet nicht.** Sie ist eine Kostenrechnung und arbeitet mit den
+gespeicherten, minutengenauen Werten — `roundTimeToStep` und `returnTravelCreditMs`
+kommen hier nicht zum Einsatz (anders als im DATEV-Ausdruck, Phase 3). Die einzige
+Änderung am Rechnungsprogramm ist der Wechsel von `data.breaks` auf `pauseTotalTime`.
 
 ### Phase 3 — DATEV in der Zeiterfassung ②
 
-> **Neu zugeschnitten wegen Nachtrag 4.** Ursprünglich sollte `reportUtils.ts`
-> (673 Zeilen) mitsamt `workTimeRules.ts` portiert werden. Beides bringt aber genau
-> das mit, was Lauffer nicht will: `reportUtils` importiert `getReturnTravelCreditMs`
-> aus `returnTravel.ts`, und `workTimeRules` hebt Pausen auf das gesetzliche Minimum
-> an, kappt bei 10 Stunden und verteilt Überstunden im 15-Minuten-Raster. Damit
-> würden sich Lauffers ausgewiesene Zeiten ändern.
->
-> **Der DATEV-Bericht selbst hängt daran gar nicht.** `datevReport.ts` importiert
-> nur `enumerateDays` und `minutesToHoursLabel` und erwartet Zeilen mit
-> `dateKey`, `absenceKind`, `effectiveWorkMinutes`, `effectivePauseMinutes`,
-> `clockIn`, `effectiveClockOut` — eine kleine, klar umrissene Form, die sich aus
-> Lauffers vorhandener Rechnung erzeugen lässt.
+> **Zuschnitt nach Nachtrag 4.** `reportUtils.ts` und `workTimeRules.ts` werden
+> übernommen — sie sind reine Rechenlogik ohne Schreibzugriff und wirken damit nur
+> auf den Ausdruck, nie auf die gespeicherten Zeiten. Von `returnTravel.ts` kommt
+> ausschließlich `getReturnTravelCreditMs()` mit (liest ein Feld, das Lauffer nie
+> schreibt → dauerhaft 0). Die Erzeugung des Fahrtzeitaufschlags bleibt draußen.
 
-- [ ] `reports/datevReport.ts` + `datevPrintHtml.ts` **unverändert** portieren (beide sind rein und rundungsfrei)
-- [ ] Schmalen Adapter bauen, der Lauffers Zeilen in die erwartete Form bringt:
-      `effectiveWorkMinutes` = `workMinutesFromParts(...)` aus `reportCalc.ts`,
-      `effectivePauseMinutes` = `msToMinutes(pauseTotalTime)`,
-      `effectiveClockOut` = die tatsächliche Gehen-Zeit — **keine** Korrekturen
-- [ ] Abwesenheitslogik aus `reportUtils.ts` gezielt übernehmen (`getApprovedLeaveDates`, `isLeaveDateCancelled`, `enumerateDays`, `isWeekendDate`) — dieser Teil ist rundungsfrei; `bavariaHolidays.ts` hat Lauffer bereits
-- [ ] `utils/hoursInput.ts` portieren (Eingabe-/Formathilfen, unabhängig von der Rundung)
-- [ ] **`workTimeRules.ts` nicht portieren** — siehe offene Entscheidung unten
+- [ ] `utils/hoursInput.ts` portieren
+- [ ] `getReturnTravelCreditMs()` als kleinen Helfer anlegen — **ohne** `estimateReturnTravel`, `RETURN_HOME_BASE`, `formatReturnTravelCreditNote`
+- [ ] `reports/reportUtils.ts` portieren; `reportCalc.ts` (47 Zeilen) geht darin auf
+- [ ] `reports/workTimeRules.ts` + Tests portieren (Pausenstaffel 6h/30min und 9h/45min, 10-Stunden-Kappung, 15-Minuten-Schritte) — **nur für Bericht und Ausdruck**
+- [ ] `utils/timeRounding.ts` portieren — **ausschließlich** in der Berichts-/Druckstrecke verwenden, nie beim Speichern
+- [ ] `reports/datevReport.ts` + `datevPrintHtml.ts` portieren
 - [ ] Tab `reportsDatev` in `AdminDashboard.tsx` ergänzen (Merge, siehe 2.3)
 - [ ] `Employee.mealAllowanceRate` (Verpflegungsmehraufwand ab 8 Std) — geht in den DATEV-Export ein
-- [ ] Gegen einen echten Monat prüfen: DATEV-Summen müssen **exakt** zum bestehenden Zeiterfassungsbericht passen
-
-**Getrennt zu entscheiden (kein Blocker für Phase 3):** Timos `workTimeRules.ts`
-enthält zwei verschiedene Dinge. Das eine ist Arbeitszeitrecht — ab 6 Std sind
-30 Min Pause fällig, ab 9 Std 45 Min, höchstens 10 Std pro Tag. Das andere ist
-das 15-Minuten-Raster für die Überstundenverteilung, also Rundung. Die Rundung
-entfällt nach Nachtrag 4. Ob Lauffer die **gesetzliche Pausenkorrektur** im
-Bericht haben möchte, ist eine eigene fachliche Frage — sie verändert
-ausgewiesene Zeiten und wird deshalb nicht stillschweigend mit eingebaut.
+- [ ] **Gegenprobe**: ein Monat vor und nach der Umstellung. Die gespeicherten Zeiteinträge müssen **byte-gleich** bleiben; nur die Druckansicht darf andere Zahlen zeigen.
+- [ ] **Kontrolle auf dem Schreibpfad**: `grep -rn "roundTimeToStep\|applyWorkTimeRules" src/services src/components/ClockOutForm.tsx src/components/ExtendedClockOutModal.tsx` muss leer bleiben
 
 ### Phase 4 — Krankheitstage in der Zeiterfassung ③
 
@@ -575,7 +582,7 @@ Klein und unabhängig — kann jederzeit vorgezogen werden.
 - [ ] ⚠️ **Nur die Maske übernehmen.** Lauffers `VacationTab` hat 778 Zeilen gegen 390 bei Timo — Teamkalender, Admin-Anlage, Konfliktwarnungen und Kontenverwaltung dürfen dabei nicht verloren gehen.
 
 ### Phase 5 — Zeiterfassung: Rechenkern & restliche Berichte
-- [ ] `utils/regularWorkTime.ts`, `utils/monthlyWorkedMinutes.ts` portieren (mit Tests) — **ohne** `utils/returnTravel.ts`
+- [ ] `utils/regularWorkTime.ts`, `utils/monthlyWorkedMinutes.ts` portieren (mit Tests)
 - [ ] `reports/printHtml.ts`, `reports/reportPdf.ts`
 - [ ] `ReportsTab.tsx` mergen: Timo-Struktur **plus** Lauffer-Spalten für Maschinenstunden und `documentationOnlyEntry`
 - [ ] Berichtsversand als PDF: `reportMailService.ts` + `api/send-report.js` (Absender über den bestehenden Email-Proxy)
@@ -693,6 +700,7 @@ automatisch**, am Rechner nicht. Das ist eine andere Weiche vor demselben Bildsc
 | **Schreibzugriff über Projektgrenze** scheitert an den Rules | Anonyme Auth muss in der Zeiterfassungs-Firebase aktiviert sein; `timeTrackingAuthReady` protokolliert Fehlschläge, Lesen funktioniert weiter |
 | **Zwei Stundenbegriffe** (Brutto im Rechnungsprogramm, Netto in der Zeiterfassung) | Der Pausen-Fehler (Nachtrag 4) wird in Phase 2 behoben, bevor die Nachkalkulation umgestellt wird; danach gegen denselben Monat gegenrechnen |
 | **Versehentliche Änderung an einem Timo-Repo** | Timo ist reine Referenz: nur lesen, kein `git add`/`commit`/`push` in `Timo_Rechnungsprogramm` und `timo_Zeiterfassung` |
+| **Rundung rutscht vom Ausdruck in die gespeicherten Daten** | `roundTimeToStep` und `applyWorkTimeRules` dürfen nur in der Berichts-/Druckstrecke vorkommen; Gegenprobe per `grep` über `src/services` und die Stempel-Komponenten (Phase 3) |
 | **Fremde Firmendaten** rutschen mit | Branding ausschließlich über `appBranding.ts` / `companyProfile.ts`; vor jedem Commit `grep -ri "reislöhner\|reisloehner\|petra"` |
 | `zeiterfassungreact` verliert seinen Urlaubs-Vorsprung | `VacationTab` ist die eine Datei, bei der Lauffer führend ist — nur die Krankmeldung nachziehen |
 
