@@ -21,12 +21,13 @@ import {
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, auth, storage } from './firebaseConfig'
-import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement } from '../types'
+import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement, MaterialType } from '../types'
 import { formatDateForInputLocal } from '../utils/dateUtils'
 import { withTimeout } from '../utils/withTimeout'
 import { sanitizeTimeEntryForRead } from '../utils/sanitizeTimeEntry'
 import { getFileImageSrc } from '../utils/fileImageSrc'
 import { toFileUploadRef } from '../utils/fileUploadRef'
+import * as materials from './data/materials'
 import {
   convertToDate as convertToDateShared,
   calculateWorkingDays as calculateWorkingDaysShared,
@@ -3071,6 +3072,41 @@ class DataServiceClass {
       console.error('Fehler beim Abrufen der Datei-Uploads:', error)
       return []
     }
+  }
+
+  // ==================== MATERIALSTAMM ====================
+  // Gemeinsam mit dem Rechnungsprogramm: dieselbe Collection `materialTypes`,
+  // dort als „Artikel". Reine Stammdatenpflege – Materialverbrauch wird in
+  // dieser App nicht erfasst.
+
+  async getActiveMaterialTypes(): Promise<MaterialType[]> {
+    await this.authReady
+    return materials.getActiveMaterialTypes()
+  }
+
+  async getAllMaterialTypes(): Promise<MaterialType[]> {
+    await this.authReady
+    return materials.getAllMaterialTypes()
+  }
+
+  async createMaterialType(data: Partial<MaterialType>): Promise<string> {
+    await this.authReady
+    return materials.createMaterialType(data)
+  }
+
+  async updateMaterialType(id: string, data: Partial<MaterialType>): Promise<void> {
+    await this.authReady
+    return materials.updateMaterialType(id, data)
+  }
+
+  async deleteMaterialType(id: string): Promise<void> {
+    await this.authReady
+    return materials.deleteMaterialType(id)
+  }
+
+  async deleteAllMaterialTypes(): Promise<number> {
+    await this.authReady
+    return materials.deleteAllMaterialTypes()
   }
 }
 

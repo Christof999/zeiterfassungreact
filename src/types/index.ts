@@ -41,6 +41,32 @@ export interface Project {
   status?: 'active' | 'inactive' | 'aktiv' | 'planned' | 'completed' | 'archived'
 }
 
+/**
+ * Eine Material- oder Leistungsart aus dem gemeinsamen Stamm.
+ *
+ * Die Collection `materialTypes` wird zusammen mit dem Rechnungsprogramm
+ * genutzt: dort sind dieselben Dokumente die „Artikel". Deshalb tragen sie
+ * zusätzliche Felder, die hier nicht ausgewertet werden.
+ */
+export interface MaterialType {
+  id: string
+  name: string
+  /** z. B. m², Stück, Sack */
+  unitLabel?: string
+  /** Verkaufspreis pro Mengeneinheit (EUR) */
+  unitPriceEur?: number
+  /** Einkaufspreis pro Mengeneinheit (EUR) – nur für die Nachkalkulation */
+  purchasePriceEur?: number
+  /**
+   * Material oder Dienstleistung. Dienstleistungen stammen aus dem
+   * Rechnungsprogramm und sind hier kein buchbares Material. Fehlt die Angabe,
+   * gilt `material`.
+   */
+  kind?: 'material' | 'service'
+  isActive?: boolean
+  sortOrder?: number
+}
+
 export interface TimeEntry {
   id: string
   employeeId: string
