@@ -16,6 +16,7 @@ const VehicleModal: React.FC<VehicleModalProps> = ({ vehicle, onClose, onSave })
     type: '',
     licensePlate: '',
     hourlyRate: '',
+    hourlyBillingRate: '',
     isActive: true
   })
   const [isLoading, setIsLoading] = useState(false)
@@ -27,6 +28,7 @@ const VehicleModal: React.FC<VehicleModalProps> = ({ vehicle, onClose, onSave })
         type: vehicle.type || '',
         licensePlate: vehicle.licensePlate || '',
         hourlyRate: vehicle.hourlyRate ? String(vehicle.hourlyRate) : '',
+        hourlyBillingRate: vehicle.hourlyBillingRate ? String(vehicle.hourlyBillingRate) : '',
         isActive: vehicle.isActive !== false
       })
     }
@@ -42,6 +44,9 @@ const VehicleModal: React.FC<VehicleModalProps> = ({ vehicle, onClose, onSave })
         type: formData.type,
         licensePlate: formData.licensePlate,
         hourlyRate: formData.hourlyRate ? parseFloat(formData.hourlyRate) : undefined,
+        hourlyBillingRate: formData.hourlyBillingRate
+          ? parseFloat(formData.hourlyBillingRate)
+          : undefined,
         isActive: formData.isActive
       }
 
@@ -95,7 +100,7 @@ const VehicleModal: React.FC<VehicleModalProps> = ({ vehicle, onClose, onSave })
             />
           </div>
           <div className="form-group">
-            <label>Stundenpreis (€):</label>
+            <label>Kostensatz (€/Std):</label>
             <input
               type="number"
               step="0.01"
@@ -104,6 +109,19 @@ const VehicleModal: React.FC<VehicleModalProps> = ({ vehicle, onClose, onSave })
               onChange={(e) => setFormData({ ...formData, hourlyRate: e.target.value })}
               placeholder="z.B. 25.00"
             />
+            <small>Was die Maschinenstunde uns kostet.</small>
+          </div>
+          <div className="form-group">
+            <label>Verrechnungssatz (€/Std):</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.hourlyBillingRate}
+              onChange={(e) => setFormData({ ...formData, hourlyBillingRate: e.target.value })}
+              placeholder="optional"
+            />
+            <small>Was dem Kunden berechnet wird – Grundlage der Nachkalkulation.</small>
           </div>
           <div className="form-group">
             <label>Status:</label>

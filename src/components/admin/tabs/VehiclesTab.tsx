@@ -106,7 +106,8 @@ const VehiclesTab: React.FC = () => {
               <tr>
                 <th>Name</th>
                 <th>Kennzeichen</th>
-                <th>€/Std</th>
+                <th>Kosten €/Std</th>
+                <th>Verrechnung €/Std</th>
                 <th>Status</th>
                 <th>Aktionen</th>
               </tr>
@@ -116,7 +117,12 @@ const VehiclesTab: React.FC = () => {
                 <tr key={vehicle.id}>
                   <td data-label="Name">{vehicle.name}</td>
                   <td data-label="Kennzeichen">{vehicle.licensePlate || '-'}</td>
-                  <td data-label="€/Std">{vehicle.hourlyRate ? `${vehicle.hourlyRate.toFixed(2)} €` : '-'}</td>
+                  <td data-label="Kosten €/Std">
+                    {vehicle.hourlyRate ? `${vehicle.hourlyRate.toFixed(2)} €` : '-'}
+                  </td>
+                  <td data-label="Verrechnung €/Std">
+                    {vehicle.hourlyBillingRate ? `${vehicle.hourlyBillingRate.toFixed(2)} €` : '-'}
+                  </td>
                   <td data-label="Status">
                     <span className={`status-badge ${vehicle.isActive !== false ? 'active' : 'inactive'}`}>
                       {vehicle.isActive !== false ? 'Aktiv' : 'Inaktiv'}

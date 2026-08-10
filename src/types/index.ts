@@ -119,7 +119,17 @@ export interface Vehicle {
   name: string
   type?: string
   licensePlate?: string
+  /**
+   * Kostensatz (EUR/Std) – was die Maschinenstunde das Unternehmen kostet.
+   * Die bereits gepflegten Werte sind Kosten; das Feld behält seine Bedeutung.
+   */
   hourlyRate?: number
+  /**
+   * Verrechnungssatz (EUR/Std) – was dem Kunden je Maschinenstunde berechnet
+   * wird. Grundlage der Erlösseite in der Nachkalkulation des
+   * Rechnungsprogramms. Ohne Angabe wird dort kein Ergebnis ausgewiesen.
+   */
+  hourlyBillingRate?: number
   isActive?: boolean
 }
 
