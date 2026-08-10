@@ -4,6 +4,20 @@ Stand: 07.08.2026 · Branch `claude/repository-comparison-alignment-lz922s`
 
 Dieses Dokument liegt identisch in `zeiterfassungreact` und `Rechnungsprogramm`.
 
+## Umsetzungsstand (07.08.2026)
+
+**Erledigt und gepusht** — Branch `claude/repository-comparison-alignment-lz922s`:
+
+| | |
+|---|---|
+| Phase 0 | vollständig, bis auf das Scharfschalten der Firestore-Regeln |
+| Phase 9a | Datenmodell und Rechenlogik des Beleg-Editors, mit Tests |
+| Phase 9b | Standardtexte inkl. Anschreiben und Schlusstext |
+| Phase 9c | Undo/Redo verdrahtet; übrige Bausteine im Repo, noch nicht eingebaut |
+
+Beide Repos bauen grün, Tests laufen durch (Zeiterfassung 26, Rechnungsprogramm 32).
+An Timos Repos wurde nichts geändert.
+
 ## Entschieden (Vorgabe Christof, 07.08.2026)
 
 **Priorität für Lauffer, in dieser Reihenfolge:**
@@ -408,11 +422,12 @@ Betroffen sind ausschließlich `zeiterfassungreact` und `Rechnungsprogramm`.
 Keine Datenänderung, kein Risiko — deshalb der Anfang.
 
 - [ ] `utils/timeRounding.ts` kommt erst in Phase 3 (nur Berichts-/Druckstrecke, Nachtrag 4)
-- [ ] `constants/appBranding.ts` in `zeiterfassungreact`, Lauffer-Werte; alle hart verdrahteten Strings in `Login`, `AdminLogin`, `SplashScreen`, `TimeTracking`, `AdminDashboard`, `agentService` darauf umstellen
-- [ ] `utils/companyProfile.ts` in `Rechnungsprogramm` — Struktur von Timo, Werte **aus `CompanyData`** statt hart kodiert; Lücken über Setup-Seite pflegbar
-- [ ] `DynamicValue` / `DynamicRecord` in beide `types/index.ts`, `any` schrittweise ersetzen
-- [ ] `firestore.rules` in `zeiterfassungreact` anlegen und in `firebase.json` eintragen; Lauffer-Indizes (`vehicles`, `vehicleUsages`, `leaveRequests`) und die PDF-Erlaubnis in `storage.rules` **behalten**
-- [ ] `package.json` aufräumen (Build-Tooling nach `devDependencies`); `docx`-Kette in `Rechnungsprogramm` behalten
+- [x] `constants/appBranding.ts` in `zeiterfassungreact`, Lauffer-Werte; alle hart verdrahteten Strings in `Login`, `AdminLogin`, `SplashScreen`, `TimeTracking`, `AdminDashboard`, `agentService` darauf umstellen
+- [x] `utils/companyProfile.ts` in `Rechnungsprogramm` — Struktur von Timo, Werte **aus `CompanyData`** statt hart kodiert; Lücken über Setup-Seite pflegbar
+- [x] `DynamicValue` / `DynamicRecord` in beide `types/index.ts`, `any` schrittweise ersetzen
+- [x] `firestore.rules` in `zeiterfassungreact` angelegt — **bewusst noch nicht in `firebase.json` eingetragen** (Deploy würde sie scharf schalten); Lauffer-Indizes und PDF-Erlaubnis in `storage.rules` behalten
+- [ ] `firestore.rules` gegen die Firebase-Konsole abgleichen, dann in `firebase.json` eintragen; Lauffer-Indizes (`vehicles`, `vehicleUsages`, `leaveRequests`) und die PDF-Erlaubnis in `storage.rules` **behalten**
+- [x] `package.json` aufräumen (Build-Tooling nach `devDependencies`); `docx`-Kette in `Rechnungsprogramm` behalten
 
 ### Phase 1 — Gemeinsamer Materialstamm ①
 
@@ -625,18 +640,22 @@ Rechenlogik muss vor der Oberfläche stehen, sonst rechnen alte und neue Zeilen
 unterschiedlich.
 
 **9a — Datenmodell und Rechenlogik zuerst**
-- [ ] `Surcharge`, `optional`, `DocumentLineKind: 'text'` in `types/index.ts`
-- [ ] `calculations.ts`: `calculateSurchargeAmount()` und `computeLineNetTotal()` (Grundbetrag → Aufschlag → Rabatt, feste Beträge zeilenweise)
-- [ ] `documentLines.ts`: `isTextDocumentLine`, `isSectionLine`, `adjustmentForFirestore`
-- [ ] `invoiceService`/`offerService`: `optional`-Zeilen aus den Summen nehmen, `discount`/`surcharge` in Angebotszeilen persistieren, Übernahme in `convertOfferToInvoice`
+- [x] `Surcharge`, `optional`, `DocumentLineKind: 'text'` in `types/index.ts`
+- [x] `calculations.ts`: `calculateSurchargeAmount()` und `computeLineNetTotal()` (Grundbetrag → Aufschlag → Rabatt, feste Beträge zeilenweise)
+- [x] `documentLines.ts`: `isTextDocumentLine`, `isSectionLine`, `adjustmentForFirestore`
+- [x] `invoiceService`/`offerService`: `optional`-Zeilen aus den Summen nehmen, `discount`/`surcharge` in Angebotszeilen persistieren, Übernahme in `convertOfferToInvoice`
 - [ ] **Word- und PDF-Export gleichzeitig** auf die neuen Zeilentypen heben, sonst driften die beiden Ausdrucke auseinander
 
 **9b — Standardtexte**
-- [ ] `standardTextService.ts`, `pages/StandardTexts/`, Sidebar-Eintrag
-- [ ] `StandardTextPicker`, `DocumentTextBlock`, `introText`/`closingText` in Rechnung, Angebot und LV
+- [x] `standardTextService.ts`, `pages/StandardTexts/`, Sidebar-Eintrag
+- [x] `DocumentTextBlock`, `introText`/`closingText` in Rechnung, Angebot und LV (Drag & Drop aus den Standardtexten)
+- [ ] `StandardTextPicker` an den Positionszeilen einblenden (kommt mit 9c)
 
 **9c — Editor-Bedienung**
-- [ ] `useUndoableState.ts` (Undo/Redo), `CollapsibleLineRow`, `LineAdjustmentFields`, `RowActionsMenu`
+- [x] `useUndoableState.ts` (Undo/Redo) in Rechnung und Angebot, mit Tests
+- [x] `CollapsibleLineRow`, `LineAdjustmentFields`, `RowActionsMenu`, `ArticlePalette`, `ArticleDropZone`, `dragConstants` ins Repo geholt
+- [ ] `CollapsibleLineRow` + `LineAdjustmentFields` in den Positionszeilen verdrahten
+- [ ] `RowActionsMenu` in den Listenansichten verdrahten
 - [ ] `ArticlePalette` + `ArticleDropZone` + `dragConstants`, `DraggableDocumentLine` mergen
 - [ ] Laufende Positionsnummern ohne Überschriften/Textbausteine, „alle auf-/zuklappen"
 - [ ] Artikel und Standardtext direkt aus dem Editor anlegen
