@@ -25,6 +25,7 @@ import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, L
 import { formatDateForInputLocal } from '../utils/dateUtils'
 import { withTimeout } from '../utils/withTimeout'
 import { sanitizeTimeEntryForRead } from '../utils/sanitizeTimeEntry'
+import { getBavariaHolidayName } from '../utils/bavariaHolidays'
 import { getFileImageSrc } from '../utils/fileImageSrc'
 import { toFileUploadRef } from '../utils/fileUploadRef'
 import * as materials from './data/materials'
@@ -3072,6 +3073,56 @@ class DataServiceClass {
       console.error('Fehler beim Abrufen der Datei-Uploads:', error)
       return []
     }
+  }
+
+  /**
+   * Meldet einen Mitarbeiter für einen Zeitraum krank.
+   *
+   * Anders als ein Urlaubsantrag ist das kein Antrag, sondern eine Feststellung
+   * durch die Verwaltung – der Eintrag wird deshalb direkt als genehmigt
+   * angelegt. Wochenenden und bayerische Feiertage zählen nicht als Krankheitstage.
+   */
+  async reportSickLeave(data: {
+    employeeId: string
+    employeeName?: string
+    startDate: Date
+    endDate: Date
+    reason?: string
+    reportedBy?: string
+  }): Promise<string> {
+    await this.authReady
+
+    const current = new Date(data.startDate)
+    current.setHours(12, 0, 0, 0)
+    const last = new Date(data.endDate)
+    last.setHours(12, 0, 0, 0)
+
+    let workingDays = 0
+    while (current <= last) {
+      const day = current.getDay()
+      if (day !== 0 && day !== 6 && !getBavariaHolidayName(current)) workingDays++
+      current.setDate(current.getDate() + 1)
+    }
+    if (workingDays === 0) {
+      throw new Error(
+        'Im gewählten Zeitraum liegt kein Arbeitstag (Wochenenden und Feiertage zählen nicht).'
+      )
+    }
+
+    const docRef = await addDoc(collection(db, 'leaveRequests'), {
+      employeeId: data.employeeId,
+      employeeName: data.employeeName || '',
+      startDate: data.startDate,
+      endDate: data.endDate,
+      type: 'sick',
+      reason: data.reason || '',
+      workingDays,
+      status: 'approved',
+      approvedBy: data.reportedBy || 'Admin',
+      approvedAt: new Date(),
+      createdAt: new Date()
+    })
+    return docRef.id
   }
 
   // ==================== MATERIALSTAMM ====================

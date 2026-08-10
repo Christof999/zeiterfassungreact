@@ -30,6 +30,16 @@ const VacationTab: React.FC = () => {
     reason: ''
   })
   const [adminWorkingDays, setAdminWorkingDays] = useState(0)
+  // Krankmeldung: keine Antragstellung, sondern eine Feststellung durch die
+  // Verwaltung – wird direkt genehmigt gespeichert.
+  const [sickModalOpen, setSickModalOpen] = useState(false)
+  const [isSavingSick, setIsSavingSick] = useState(false)
+  const [sickForm, setSickForm] = useState({
+    employeeId: '',
+    startDate: '',
+    endDate: '',
+    reason: ''
+  })
 
   useEffect(() => {
     loadData()
@@ -59,6 +69,51 @@ const VacationTab: React.FC = () => {
     })
     setAdminWorkingDays(0)
     setCreateModalOpen(true)
+  }
+
+  const openSickModal = () => {
+    const today = new Date().toISOString().slice(0, 10)
+    setSickForm({ employeeId: '', startDate: today, endDate: today, reason: '' })
+    setSickModalOpen(true)
+  }
+
+  const handleReportSick = async () => {
+    if (!sickForm.employeeId) {
+      toast.error('Bitte einen Mitarbeiter auswählen')
+      return
+    }
+    const start = new Date(`${sickForm.startDate}T12:00:00`)
+    const end = new Date(`${sickForm.endDate}T12:00:00`)
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      toast.error('Bitte gültige Daten angeben')
+      return
+    }
+    if (end < start) {
+      toast.error('Das Ende darf nicht vor dem Beginn liegen')
+      return
+    }
+
+    setIsSavingSick(true)
+    try {
+      const emp = employees.find((e) => e.id === sickForm.employeeId)
+      const employeeName =
+        emp?.name || `${emp?.firstName || ''} ${emp?.lastName || ''}`.trim() || 'Mitarbeiter'
+      await DataService.reportSickLeave({
+        employeeId: sickForm.employeeId,
+        employeeName,
+        startDate: start,
+        endDate: end,
+        reason: sickForm.reason.trim(),
+        reportedBy: 'Admin'
+      })
+      toast.success('Krankmeldung gespeichert')
+      setSickModalOpen(false)
+      loadData()
+    } catch (error: any) {
+      toast.error(error?.message || 'Krankmeldung konnte nicht gespeichert werden')
+    } finally {
+      setIsSavingSick(false)
+    }
   }
 
   const adminConflictMessages = (): string[] => {
@@ -386,6 +441,9 @@ const VacationTab: React.FC = () => {
           <div className="vacation-admin-toolbar">
             <button type="button" className="btn primary-btn" onClick={openCreateLeaveModal}>
               Neuen Urlaubsantrag erfassen
+            </button>
+            <button type="button" className="btn secondary-btn" onClick={openSickModal}>
+              Krankheit melden
             </button>
           </div>
           <div className="filter-tabs">
@@ -768,6 +826,86 @@ const VacationTab: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {sickModalOpen && (
+        <div className="modal-overlay" onClick={() => !isSavingSick && setSickModalOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Krankheit melden</h3>
+              <button
+                type="button"
+                className="close-modal-btn"
+                onClick={() => setSickModalOpen(false)}
+                disabled={isSavingSick}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="no-data" style={{ marginTop: 0 }}>
+                Der Eintrag wird sofort als genehmigt gespeichert – eine Krankmeldung ist
+                kein Antrag. Wochenenden und bayerische Feiertage zählen nicht mit.
+              </p>
+              <div className="form-group">
+                <label>Mitarbeiter:</label>
+                <select
+                  value={sickForm.employeeId}
+                  onChange={(e) => setSickForm({ ...sickForm, employeeId: e.target.value })}
+                >
+                  <option value="">Bitte wählen…</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name || `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Von:</label>
+                <input
+                  type="date"
+                  value={sickForm.startDate}
+                  onChange={(e) => setSickForm({ ...sickForm, startDate: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Bis:</label>
+                <input
+                  type="date"
+                  value={sickForm.endDate}
+                  onChange={(e) => setSickForm({ ...sickForm, endDate: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Bemerkung (optional):</label>
+                <textarea
+                  value={sickForm.reason}
+                  onChange={(e) => setSickForm({ ...sickForm, reason: e.target.value })}
+                  rows={2}
+                />
+              </div>
+              <div className="form-group text-center">
+                <button
+                  type="button"
+                  className="btn primary-btn"
+                  onClick={handleReportSick}
+                  disabled={isSavingSick}
+                >
+                  {isSavingSick ? 'Speichere…' : 'Krankmeldung speichern'}
+                </button>
+                <button
+                  type="button"
+                  className="btn secondary-btn"
+                  onClick={() => setSickModalOpen(false)}
+                  disabled={isSavingSick}
+                >
+                  Abbrechen
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
