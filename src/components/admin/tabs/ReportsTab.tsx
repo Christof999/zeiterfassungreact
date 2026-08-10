@@ -40,6 +40,8 @@ interface ReportEntry {
   isEdited: boolean
   isReadOnly?: boolean
   holidayName?: string | null
+  /** Gesetzt bei Urlaub und Krankheit – Grundlage für Summen und DATEV-Kürzel. */
+  absenceKind?: 'vacation' | 'holiday' | 'sick'
 }
 
 interface EmployeeSummary {
@@ -253,8 +255,9 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
   const isLeaveDateCancelled = (request: LeaveRequest, dateKey: string): boolean =>
     (request.cancelledDates || []).some((key) => String(key).slice(0, 10) === dateKey)
 
-  const getApprovedVacationDates = (
+  const getApprovedLeaveDates = (
     requests: LeaveRequest[],
+    type: LeaveRequest['type'],
     rangeStart: Date,
     rangeEnd: Date,
     occupiedTimeEntryDates: Set<string>
@@ -266,7 +269,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     end.setHours(23, 59, 59, 999)
 
     for (const request of requests) {
-      if (request.status !== 'approved' || request.type !== 'vacation') continue
+      if (request.status !== 'approved' || request.type !== type) continue
       const reqStart = convertToDate(request.startDate)
       const reqEnd = convertToDate(request.endDate)
       if (!reqStart || !reqEnd) continue
@@ -410,53 +413,64 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
           .map((entry) => entry.dateKey)
           .filter((dateKey) => !!dateKey)
       )
-      const vacationEntries: ReportEntry[] = getApprovedVacationDates(
-        leaveRequests,
-        start,
-        end,
-        occupiedTimeEntryDates
-      ).map(({ date, request }) => {
-        const dateKey = getDateKey(date)
-        const syntheticClockIn = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 7, 0, 0, 0)
-        const syntheticClockOut = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 17, 0, 0, 0)
-        const reason = (request.reason || '').trim()
-        const notes = reason
-          ? `Genehmigter Urlaub (${VACATION_WORK_HOURS_LABEL} Arbeitsstunden): ${reason}`
-          : `Genehmigter Urlaub (${VACATION_WORK_HOURS_LABEL} Arbeitsstunden)`
-        const originalEntry: TimeEntry = {
-          id: `vacation-${request.id || dateKey}-${dateKey}`,
-          employeeId: selectedEmployeeId,
-          projectId: 'vacation',
-          clockInTime: syntheticClockIn,
-          clockOutTime: syntheticClockOut,
-          pauseTotalTime: 0,
-          notes,
-          isVacationDay: true
-        }
+      /**
+       * Baut eine bezahlte Abwesenheitszeile (Urlaub oder Krankheit).
+       *
+       * Beide werden mit derselben Regelarbeitszeit vergütet wie ein Urlaubstag –
+       * bei Krankheit greift die Lohnfortzahlung, ein Tag mit 0 Stunden wäre falsch.
+       */
+      const buildAbsenceEntries = (
+        type: 'vacation' | 'sick',
+        projectName: string,
+        label: string
+      ): ReportEntry[] =>
+        getApprovedLeaveDates(leaveRequests, type, start, end, occupiedTimeEntryDates).map(
+          ({ date, request }) => {
+            const dateKey = getDateKey(date)
+            const syntheticClockIn = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 7, 0, 0, 0)
+            const syntheticClockOut = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 17, 0, 0, 0)
+            const reason = (request.reason || '').trim()
+            const base = `${label} (${VACATION_WORK_HOURS_LABEL} Arbeitsstunden)`
+            const notes = reason ? `${base}: ${reason}` : base
+            const originalEntry: TimeEntry = {
+              id: `${type}-${request.id || dateKey}-${dateKey}`,
+              employeeId: selectedEmployeeId,
+              projectId: type,
+              clockInTime: syntheticClockIn,
+              clockOutTime: syntheticClockOut,
+              pauseTotalTime: 0,
+              notes,
+              isVacationDay: type === 'vacation'
+            }
 
-        return {
-          id: originalEntry.id,
-          originalEntry,
-          source: 'leave-request',
-          date: formatDateForDisplay(date),
-          dateRaw: date,
-          dateKey,
-          projectId: 'vacation',
-          projectName: 'Urlaub',
-          clockIn: '',
-          clockOut: '',
-          pauseMinutes: 0,
-          pauseMs: 0,
-          workHours: VACATION_WORK_HOURS_LABEL,
-          notes,
-          originalNotes: notes,
-          isEdited: false,
-          isReadOnly: true,
-          holidayName: getBavariaHolidayName(date)
-        }
-      })
+            return {
+              id: originalEntry.id,
+              originalEntry,
+              source: 'leave-request' as const,
+              date: formatDateForDisplay(date),
+              dateRaw: date,
+              dateKey,
+              projectId: type,
+              projectName,
+              clockIn: '',
+              clockOut: '',
+              pauseMinutes: 0,
+              pauseMs: 0,
+              workHours: VACATION_WORK_HOURS_LABEL,
+              notes,
+              originalNotes: notes,
+              isEdited: false,
+              isReadOnly: true,
+              absenceKind: type,
+              holidayName: getBavariaHolidayName(date)
+            }
+          }
+        )
 
-      const reportRows = [...entries, ...vacationEntries].sort((a, b) => {
+      const vacationEntries = buildAbsenceEntries('vacation', 'Urlaub', 'Genehmigter Urlaub')
+      const sickEntries = buildAbsenceEntries('sick', 'Krank', 'Krankheit')
+
+      const reportRows = [...entries, ...vacationEntries, ...sickEntries].sort((a, b) => {
         const ta = a.dateRaw?.getTime() || 0
         const tb = b.dateRaw?.getTime() || 0
         if (ta !== tb) return ta - tb

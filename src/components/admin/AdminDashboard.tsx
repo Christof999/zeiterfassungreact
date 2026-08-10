@@ -9,6 +9,7 @@ import EmployeesTab from './tabs/EmployeesTab'
 import ProjectsTab from './tabs/ProjectsTab'
 import VehiclesTab from './tabs/VehiclesTab'
 import MaterialTypesTab from './tabs/MaterialTypesTab'
+import DatevReportTab from './tabs/DatevReportTab'
 import ReportsTab from './tabs/ReportsTab'
 import VacationTab from './tabs/VacationTab'
 import MoergelChat from './MoergelChat'
@@ -25,6 +26,7 @@ type TabType =
   | 'material'
   | 'costing'
   | 'reports'
+  | 'reportsDatev'
   | 'vacation'
 
 const AdminDashboard: React.FC = () => {
@@ -174,7 +176,8 @@ const AdminDashboard: React.FC = () => {
     { id: 'material' as TabType, label: 'Material' },
     { id: 'costing' as TabType, label: 'Nachkalkulation' },
     { id: 'vacation' as TabType, label: 'Urlaub' },
-    { id: 'reports' as TabType, label: 'Zeiterfassungsbericht' }
+    { id: 'reports' as TabType, label: 'Zeiterfassungsbericht' },
+    { id: 'reportsDatev' as TabType, label: 'Zeiterfassungsbericht DATEV' }
   ]
 
   const renderPushSettings = (renderAsPage = false) => (
@@ -331,6 +334,7 @@ const AdminDashboard: React.FC = () => {
           {currentTab === 'projectsArchived' && <ProjectsTab variant="archived" />}
           {currentTab === 'vehicles' && <VehiclesTab />}
           {currentTab === 'material' && <MaterialTypesTab />}
+          {currentTab === 'reportsDatev' && <DatevReportTab />}
           {currentTab === 'costing' && <ReportsTab defaultReportType="project" allowedReportTypes={['project']} />}
           {currentTab === 'vacation' && <VacationTab />}
           {currentTab === 'reports' && <ReportsTab defaultReportType="employee" allowedReportTypes={['employee']} />}
