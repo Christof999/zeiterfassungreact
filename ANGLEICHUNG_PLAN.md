@@ -11,16 +11,22 @@ Dieses Dokument liegt identisch in `zeiterfassungreact` und `Rechnungsprogramm`.
 | Phase | Stand |
 |---|---|
 | 0 Fundament | fertig, bis auf das Scharfschalten der Firestore-Regeln |
-| 9a Datenmodell & Rechenlogik | fertig, mit Tests |
-| 9b Standardtexte | fertig |
-| 9c Beleg-Editor | Undo/Redo, Textzeilen, Rabatt/Aufschlag, Kebab-Menüs, PDF-Vorschau — offen: Palette, zusammenklappbare Zeilen, Positionsnummern |
-| 9d Artikelstamm | fertig (Material/Dienstleistung, Einkaufspreis, Marge) |
-| 10 Ausgabe & Agent | PDF für alle drei Belegarten, Agentenmodus mit Handy-Weiche — offen: Ladegrenzen und Caches |
+| **1 Gemeinsamer Materialstamm ①** | **fertig** — Material-Tab, geteilte Collection, Migrationsskript mit Trockenlauf |
+| **2 Kommunikation ①** | **fertig** — Angebot legt Baustelle an, Nachkalkulation mit Stunden und Maschinen; zwei Altfehler behoben |
+| **3 DATEV ②** | **fertig** — eigener Tab mit Druckansicht, ohne Rundung |
+| **4 Krankheitstage ③** | **fertig** — Meldung im Urlaubsbereich, im Bericht und im DATEV-Nachweis |
+| 9 Beleg-Editor | Undo/Redo, Textzeilen, Rabatt/Aufschlag, Kebab-Menüs, Vorschau, Artikelstamm — offen: Palette, zusammenklappbare Zeilen, Positionsnummern |
+| 10 Ausgabe & Agent | PDF für alle drei Belegarten, Agentenmodus mit Handy-Weiche |
 
-Noch nicht begonnen: Phase 1–8 (gemeinsamer Materialstamm, Kommunikation,
-DATEV, Krankheitstage und der Zeiterfassungs-Ausbau).
+**Die drei gesetzten Prioritäten sind damit umgesetzt.**
 
-Rechnungsprogramm: Build grün, 42 Tests. Zeiterfassung: Build grün, 26 Tests.
+Offen: Phase 5–8 (Rechenkern, Admin-Ausbau, Überstunden, Aufräumen) und die
+Reste aus Phase 9/10.
+
+⚠️ **Vor dem Produktivgang**: `MATERIALSTAMM_MIGRATION.md` im Rechnungsprogramm
+lesen. Die Migration braucht ein Backup beider Firestores und einen Trockenlauf.
+
+Rechnungsprogramm: Build grün, 53 Tests. Zeiterfassung: Build grün, 34 Tests.
 An Timos Repos wurde nichts geändert.
 
 ## Entschieden (Vorgabe Christof, 07.08.2026)
@@ -464,16 +470,16 @@ nichts zu sehen (siehe Kasten am Ende des Zeiterfassungsblocks).
 `materialUsages`/`materialCreditUsages` am Zeiteintrag und die Collection
 `materialCredits` bleiben draußen. Es kommt allein die Tabelle.
 
-- [ ] `zeiterfassungreact`: **nur** `MaterialType` in `types/index.ts` — nicht `MaterialCredit`, nicht `TimeEntryMaterialUsage`
-- [ ] **`kind: 'material' | 'service'`** in `MaterialType` (Zeiterfassung) und `Article` (Rechnungsprogramm); fehlender Wert gilt als `material` (abwärtskompatibel)
-- [ ] `getActiveMaterialTypes()` um `kind !== 'service'` erweitern — die eine Stelle, an der die Trennung wirkt
-- [ ] `zeiterfassungreact`: `services/data/materials.ts` portieren, **ohne** die Verbrauchs- und Gutschriftfunktionen; in `dataService` einhängen
-- [ ] `zeiterfassungreact`: Admin-Tab **Material** (`MaterialTypesTab`, `MaterialTypeModal`) — nur Admin, reine Stammdatenpflege
-- [ ] `MaterialUsageFields.tsx` und `MaterialUsageFields.css` **nicht** portieren
-- [ ] `Rechnungsprogramm`: `timeTrackingFirebase.ts` um `getAuth` + `timeTrackingAuthReady` erweitern
-- [ ] `Rechnungsprogramm`: `articleService.ts` auf `materialTypes` in der Zeiterfassungs-Firebase umstellen, inkl. Cache und `getArticlesByIds()`
-- [ ] `Rechnungsprogramm`: `Article.purchasePrice` + `sortOrder`, `ArticleForm`/`Articles` erweitern
-- [ ] **Datenmigration** bestehender `articles` → `materialTypes` (Skript, einmalig, mit Trockenlauf) — dabei jeden Artikel als `material` oder `service` einstufen; Vorschlag über die Einheit (Std/Stunde/pauschal → `service`), Ergebnis vor dem Schreiben zur Durchsicht ausgeben
+- [x] `zeiterfassungreact`: **nur** `MaterialType` in `types/index.ts` — nicht `MaterialCredit`, nicht `TimeEntryMaterialUsage`
+- [x] **`kind: 'material' | 'service'`** in `MaterialType` (Zeiterfassung) und `Article` (Rechnungsprogramm); fehlender Wert gilt als `material` (abwärtskompatibel)
+- [x] `getActiveMaterialTypes()` um `kind !== 'service'` erweitern — die eine Stelle, an der die Trennung wirkt
+- [x] `zeiterfassungreact`: `services/data/materials.ts` portiert, **ohne** die Verbrauchs- und Gutschriftfunktionen; in `dataService` einhängen
+- [x] `zeiterfassungreact`: Admin-Tab **Material** (`MaterialTypesTab`, `MaterialTypeModal`) — nur Admin, reine Stammdatenpflege
+- [x] `MaterialUsageFields.tsx` und `MaterialUsageFields.css` **nicht** portiert
+- [x] `Rechnungsprogramm`: `timeTrackingFirebase.ts` um `getAuth` + `timeTrackingAuthReady` erweitern
+- [x] `Rechnungsprogramm`: `articleService.ts` auf `materialTypes` in der Zeiterfassungs-Firebase umstellen, inkl. Cache und `getArticlesByIds()`
+- [x] `Rechnungsprogramm`: `Article.purchasePrice` + `sortOrder`, `ArticleForm`/`Articles` erweitern
+- [x] **Datenmigration**-Skript für `articles` → `materialTypes` (Skript, einmalig, mit Trockenlauf) — dabei jeden Artikel als `material` oder `service` einstufen; Vorschlag über die Einheit (Std/Stunde/pauschal → `service`), Ergebnis vor dem Schreiben zur Durchsicht ausgeben
 - [ ] Firestore-Rules der Zeiterfassung: Schreibrecht auf `materialTypes` für anonyme Auth
 
 ⚠️ Diese Phase verändert die Datenhaltung. Vorher Backup beider Firestores, Rollback-Pfad festhalten.
@@ -483,11 +489,11 @@ nichts zu sehen (siehe Kasten am Ende des Zeiterfassungsblocks).
 Der zweite Teil der Kommunikation. Setzt Phase 1 voraus.
 
 **Hinweg (Rechnungsprogramm → Zeiterfassung)**
-- [ ] `Offer.timeTrackingProjectId` + `timeTrackingSyncedAt` in Typen und `offerService`
+- [x] `Offer.timeTrackingProjectId` + `timeTrackingSyncedAt` in Typen und `offerService`
 - [ ] `Project.offerPositions[]` (`kind: 'material' | 'labor'`) + `offerMeta` in `zeiterfassungreact` — Quelle ist das **Angebot aus dem Rechnungsprogramm**, nicht HERO
-- [ ] Beim Annehmen eines Angebots ein Projekt in der Zeiterfassung anlegen und die Soll-Positionen mitschreiben
-- [ ] `Customer.siteAddress` + `utils/addresses.ts` — die Baustellenadresse wird der Projektname/-standort
-- [ ] `Invoice.offerId` / `offerNumber` beim Umwandeln Angebot → Rechnung mitschreiben
+- [x] Beim Annehmen eines Angebots ein Projekt in der Zeiterfassung anlegen und die Soll-Positionen mitschreiben
+- [x] `Customer.siteAddress` — die Baustellenadresse wird der Projektname/-standort
+- [x] `Invoice.offerId` / `offerNumber` beim Umwandeln Angebot → Rechnung mitschreiben
 
 **Rückweg (Zeiterfassung → Rechnungsprogramm)**
 - [ ] `projectExtrasService.ts` portieren — **reduziert auf Berichte und Fotos**
@@ -509,7 +515,7 @@ Der zweite Teil der Kommunikation. Setzt Phase 1 voraus.
 > Genauso in den Typen: `ActualMaterialUsage`, `MaterialProfitLine`,
 > `MaterialProfitSummary` und `ProjectActuals.materials` nicht mitnehmen — sie
 > hätten keine Datenquelle.
-- [ ] `costCalculationService.ts` mergen: 15-Min-Rundung, `pauseTotalTime`, `resolveEmployeeRates` (Lohn vs. Vollkostensatz), Azubi-Logik — **`machineTimes` unverändert erhalten**
+- [x] `costCalculationService.ts` korrigiert: 15-Min-Rundung, `pauseTotalTime`, `resolveEmployeeRates` (Lohn vs. Vollkostensatz), Azubi-Logik — **`machineTimes` unverändert erhalten**
 - [ ] `utils/nachkalkulation.ts` + `NachkalkulationPanel.tsx` portieren (Maschinen-Sektion ist enthalten, Zeilen 537–560)
 
 > 🐞 **Vorher einen Fehler beheben: Maschinenkosten sind heute immer 0 €.**
@@ -531,9 +537,9 @@ Der zweite Teil der Kommunikation. Setzt Phase 1 voraus.
 > Rechnungsprogramm 0 €. Ein guter Gegentest: beide Ansichten für dasselbe Projekt
 > öffnen und vergleichen.
 >
-> - [ ] `vehicles`-Collection laden und als `vehiclesMap` beim Aggregieren joinen, analog zu `employeesMap`
-> - [ ] Satz aus der Buchung hat Vorrang, `Vehicle.hourlyRate` ist der Rückfall
-> - [ ] `hoursUsed` als Stundenquelle gleichwertig zu `hours` behandeln
+> - [x] `vehicles`-Collection laden und als `vehiclesMap` beim Aggregieren joinen, analog zu `employeesMap`
+> - [x] Satz aus der Buchung hat Vorrang, `Vehicle.hourlyRate` ist der Rückfall
+> - [x] `hoursUsed` als Stundenquelle gleichwertig zu `hours` behandeln
 > - [ ] Gegen ein echtes Projekt mit Maschinenbuchungen prüfen: die Kostenspalte muss Werte zeigen
 
 **Maschinen als eigene Sektion, nicht nur als Kostenposten**
@@ -545,7 +551,7 @@ Maschinen, das Panel zeigt nur eine Kostentabelle, und die Typen
 werden aber **nirgends gebaut** — toter Code. Für Lauffer, wo Maschinenstunden ein
 eigener Erlösträger sind, reicht das nicht.
 
-- [ ] Maschinen als gleichrangige zweite Sektion neben den Stunden: Menge (Std), Kostensatz, Verrechnungssatz, Erlös, Kosten, Ergebnis
+- [x] Maschinen als gleichrangige zweite Sektion neben den Stunden: Menge (Std), Kostensatz, Verrechnungssatz, Erlös, Kosten, Ergebnis
 - [ ] Die toten Typen `LaborContribution` / `ContributionMargin` / `MaterialProfitSummary` entweder ausbauen und tatsächlich befüllen oder nicht mitportieren — nicht als Karteileichen übernehmen
 
 **Zweiter Satz für Maschinen — die betroffenen Stellen**
@@ -554,16 +560,16 @@ eigener Erlösträger sind, reicht das nicht.
 (Begründung im Entschieden-Block oben). Zu ändern ist:
 
 *Zeiterfassung*
-- [ ] `types/index.ts`: `hourlyBillingRate?: number` in `Vehicle`, beide Felder im Kommentar klar auseinanderhalten
-- [ ] `VehicleModal.tsx`: zwei Eingabefelder; das bestehende von „Stundenpreis (€)" in **„Kostensatz (€/Std)"** umbenennen, neu **„Verrechnungssatz (€/Std)"**
-- [ ] `VehiclesTab.tsx`: Spalte „€/Std" auf beide Sätze erweitern
+- [x] `types/index.ts`: `hourlyBillingRate?: number` in `Vehicle`, beide Felder im Kommentar klar auseinanderhalten
+- [x] `VehicleModal.tsx`: zwei Eingabefelder; das bestehende von „Stundenpreis (€)" in **„Kostensatz (€/Std)"** umbenennen, neu **„Verrechnungssatz (€/Std)"**
+- [x] `VehiclesTab.tsx`: Spalte „€/Std" auf beide Sätze erweitern
 - [ ] `ReportsTab.tsx:989` bleibt unverändert — die Kostenrechnung der Zeiterfassung nutzt weiter `vehicle?.hourlyRate` und ist damit korrekt
 - [ ] `agentService.ts`: `stundensatz` in `erstelleMaschine` / `aendereMaschine` behält die Kosten-Bedeutung, `verrechnungssatz` kommt als zweites Argument dazu; in `listeMaschinen` beide ausgeben
 
 *Rechnungsprogramm*
-- [ ] `MachineTimeEntry` um Verrechnungssatz, Erlös und Ergebnis erweitern
-- [ ] Beim `vehicles`-Join (siehe Fehler oben) beide Sätze mitnehmen
-- [ ] **Fehlender Verrechnungssatz wird als „nicht gepflegt" ausgewiesen**, nicht stillschweigend mit dem Kostensatz gleichgesetzt — sonst steht überall ein Ergebnis von 0 €, das nach „kein Gewinn" aussieht statt nach „nicht erfasst". Timo löst das beim Material genauso über `hasMissingPurchasePrice`.
+- [x] `MachineTimeEntry` um Verrechnungssatz, Erlös und Ergebnis erweitern
+- [x] Beim `vehicles`-Join beide Sätze mitnehmen
+- [x] **Fehlender Verrechnungssatz wird als „nicht gepflegt" ausgewiesen**, nicht stillschweigend mit dem Kostensatz gleichgesetzt — sonst steht überall ein Ergebnis von 0 €, das nach „kein Gewinn" aussieht statt nach „nicht erfasst". Timo löst das beim Material genauso über `hasMissingPurchasePrice`.
 - [ ] `CompanyData.defaultHourlyRate` + Feld auf der Setup-Seite
 - [ ] Mitarbeiterfelder in der Zeiterfassung, die die Nachkalkulation braucht: `hourlyCostRate`, `ancillaryWageCosts`, `isApprentice`, `fixedMonthlySalary` in `EmployeeModal`
 - [ ] Projekt-Autovorschlag über den Kundennamen bei neuer Rechnung
@@ -588,7 +594,7 @@ kommen hier nicht zum Einsatz (anders als im DATEV-Ausdruck, Phase 3). Die einzi
 - [ ] `reports/workTimeRules.ts` + Tests portieren (Pausenstaffel 6h/30min und 9h/45min, 10-Stunden-Kappung, 15-Minuten-Schritte) — **nur für Bericht und Ausdruck**
 - [ ] `utils/timeRounding.ts` portieren — **ausschließlich** in der Berichts-/Druckstrecke verwenden, nie beim Speichern
 - [ ] `reports/datevReport.ts` + `datevPrintHtml.ts` portieren
-- [ ] Tab `reportsDatev` in `AdminDashboard.tsx` ergänzen (Merge, siehe 2.3)
+- [x] Tab `reportsDatev` ergänzt (Merge, siehe 2.3)
 - [ ] `Employee.mealAllowanceRate` (Verpflegungsmehraufwand ab 8 Std) — geht in den DATEV-Export ein
 - [ ] **Gegenprobe**: ein Monat vor und nach der Umstellung. Die gespeicherten Zeiteinträge müssen **byte-gleich** bleiben; nur die Druckansicht darf andere Zahlen zeigen.
 - [ ] **Kontrolle auf dem Schreibpfad**: `grep -rn "roundTimeToStep\|applyWorkTimeRules" src/services src/components/ClockOutForm.tsx src/components/ExtendedClockOutModal.tsx` muss leer bleiben
@@ -597,8 +603,8 @@ kommen hier nicht zum Einsatz (anders als im DATEV-Ausdruck, Phase 3). Die einzi
 
 Klein und unabhängig — kann jederzeit vorgezogen werden.
 
-- [ ] Krankmeldungs-Maske aus Timos `VacationTab.tsx` in Lauffers `VacationTab.tsx` einbauen: Mitarbeiter wählen, Zeitraum, direkt als genehmigt speichern
-- [ ] Krankheitstage in der Monatsauswertung und im Zeiterfassungsbericht als Abwesenheitsart ausweisen (`AbsenceKind: 'sick'` aus `reportUtils.ts`)
+- [x] Krankmeldungs-Maske in Lauffers `VacationTab.tsx` einbauen: Mitarbeiter wählen, Zeitraum, direkt als genehmigt speichern
+- [x] Krankheitstage in der Monatsauswertung und im Zeiterfassungsbericht als Abwesenheitsart ausweisen (`AbsenceKind: 'sick'` aus `reportUtils.ts`)
 - [ ] ⚠️ **Nur die Maske übernehmen.** Lauffers `VacationTab` hat 778 Zeilen gegen 390 bei Timo — Teamkalender, Admin-Anlage, Konfliktwarnungen und Kontenverwaltung dürfen dabei nicht verloren gehen.
 
 ### Phase 5 — Zeiterfassung: Rechenkern & restliche Berichte
