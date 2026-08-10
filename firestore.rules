@@ -1,0 +1,37 @@
+rules_version = '2';
+
+// Firestore-Regeln der Zeiterfassung.
+//
+// ACHTUNG — diese Datei ist noch NICHT in `firebase.json` eingetragen und wird
+// daher von `firebase deploy` bewusst nicht angewandt. Sie hält den heutigen
+// Stand fest, damit die Regeln versioniert im Repository liegen statt nur in der
+// Firebase-Konsole. Vor dem Scharfschalten mit den dort hinterlegten Regeln
+// abgleichen: Weicht diese Datei ab, sperrt ein Deploy die laufende App aus.
+//
+// Zum Aktivieren in `firebase.json` ergänzen:
+//   "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" }
+// und anschließend `firebase deploy --only firestore:rules`.
+//
+// Zugriffsmodell: Die App meldet sich anonym an (Firebase Anonymous Auth).
+// Sämtliche Lese- und Schreibzugriffe setzen eine Anmeldung voraus. Eine feinere
+// Trennung (Admin-Claims, getrennte Leserechte je Rolle) ist bewusst noch nicht
+// abgebildet — sie gehört zusammen mit den Admin-Rollen umgesetzt und würde hier
+// sonst mehr versprechen, als die App heute prüft.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Das Rechnungsprogramm liest und schreibt den gemeinsamen Materialstamm
+    // über eine zweite, anonym angemeldete Verbindung. Eigener Block, damit die
+    // Abhängigkeit sichtbar bleibt und beim Verschärfen der Regeln nicht
+    // versehentlich mit abgeschnitten wird.
+    match /materialTypes/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Alle übrigen Sammlungen: Zeiteinträge, Projekte, Mitarbeiter, Fahrzeuge
+    // und Maschinenbuchungen, Urlaubsanträge, Datei-Uploads, Abrechnungen.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

@@ -1,3 +1,12 @@
+/**
+ * Dynamische JSON-Daten ohne festes Schema – z. B. LLM-Tool-Argumente oder
+ * Firestore-Dokumente, deren Felder erst zur Laufzeit geprüft werden. Die
+ * Verbraucher validieren selbst; ein striktes Interface ist hier nicht möglich.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type DynamicValue = any
+export type DynamicRecord = Record<string, DynamicValue>
+
 export interface Employee {
   id?: string
   username: string
