@@ -1,16 +1,17 @@
 import '../styles/SplashScreen.css'
+import { APP_DISPLAY_NAME, APP_TAGLINE, APP_LOGO_SRC, APP_LOGO_ALT } from '../constants/appBranding'
 
 const SplashScreen: React.FC = () => {
   return (
     <div className="splash-screen">
       <div className="splash-content">
         <img 
-          src="/logo.png" 
-          alt="Lauffer Logo" 
+          src={APP_LOGO_SRC}
+          alt={APP_LOGO_ALT}
           className="splash-logo"
         />
-        <h1 className="splash-title">Lauffer Zeiterfassung</h1>
-        <p className="splash-subtitle">Gartenbau • Erdbau • Natursteinhandel</p>
+        <h1 className="splash-title">{APP_DISPLAY_NAME}</h1>
+        <p className="splash-subtitle">{APP_TAGLINE}</p>
         <div className="splash-loader">
           <div className="loader-bar"></div>
         </div>

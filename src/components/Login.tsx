@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { DataService } from '../services/dataService'
 import { toast } from './ToastContainer'
 import ThemeToggle from './ThemeToggle'
+import { APP_DISPLAY_NAME, APP_TAGLINE, APP_LOGO_SRC, APP_LOGO_ALT } from '../constants/appBranding'
 import '../styles/Login.css'
 
 const Login: React.FC = () => {
@@ -54,12 +55,12 @@ const Login: React.FC = () => {
         <ThemeToggle variant="icon" className="login-theme-toggle" />
         <div className="login-logo">
           <img 
-            src="/logo.png" 
-            alt="Lauffer Logo" 
+            src={APP_LOGO_SRC}
+            alt={APP_LOGO_ALT}
             className="login-logo-image"
           />
-          <h1>Lauffer Zeiterfassung</h1>
-          <p>Gartenbau • Erdbau • Natursteinhandel</p>
+          <h1>{APP_DISPLAY_NAME}</h1>
+          <p>{APP_TAGLINE}</p>
         </div>
       </header>
 

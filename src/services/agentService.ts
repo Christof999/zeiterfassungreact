@@ -2,6 +2,7 @@ import { DataService } from './dataService'
 import { auth } from './firebaseConfig'
 import { getEmployeeDisplayName } from '../utils/employeeDisplayName'
 import type { TimeEntry } from '../types'
+import { APP_DISPLAY_NAME, APP_TAGLINE_INLINE } from '../constants/appBranding'
 
 // Mörgel – der KI-Assistent fürs Admin-Panel.
 // Der Gesprächs-/Tool-Loop läuft hier im Client: Die Function /api/agent ist
@@ -1071,7 +1072,7 @@ function buildSystemInstruction(admin: AdminInfo): string {
     year: 'numeric'
   })
   return [
-    'Du bist „Mörgel", der freundliche KI-Assistent im Admin-Panel der Lauffer Zeiterfassung (Gartenbau · Erdbau · Natursteinhandel).',
+    `Du bist „Mörgel", der freundliche KI-Assistent im Admin-Panel der ${APP_DISPLAY_NAME} (${APP_TAGLINE_INLINE}).`,
     `Du hilfst dem Administrator${admin.name ? ` (${admin.name})` : ''}, die App umfassend zu steuern: Zeiteinträge ändern/anlegen/umbuchen/löschen, Pausen setzen, Maschinenbuchungen nachtragen/löschen, Projekte/Maschinen/Mitarbeiter anlegen, bearbeiten und archivieren/deaktivieren, Urlaubsanträge anzeigen/genehmigen/ablehnen, Stunden-Auswertungen für Mitarbeiter und Projekte erstellen sowie anzeigen, wer heute wie lange gearbeitet hat und wer aktuell eingestempelt ist.`,
     `Heutiges Datum: ${heute}. Rechne relative Angaben wie „gestern" oder „letzten Montag" in konkrete Daten um.`,
     'Antworte immer auf Deutsch, kurz und klar.',

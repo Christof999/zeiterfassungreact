@@ -11,6 +11,7 @@ import VehiclesTab from './tabs/VehiclesTab'
 import ReportsTab from './tabs/ReportsTab'
 import VacationTab from './tabs/VacationTab'
 import MoergelChat from './MoergelChat'
+import { APP_DISPLAY_NAME, APP_LOGO_SRC, APP_LOGO_ALT } from '../../constants/appBranding'
 import '../../styles/AdminDashboard.css'
 
 type TabType =
@@ -276,11 +277,11 @@ const AdminDashboard: React.FC = () => {
         </div>
         <div className="admin-logo">
           <img 
-            src="/logo.png" 
-            alt="Lauffer Logo" 
+            src={APP_LOGO_SRC}
+            alt={APP_LOGO_ALT}
             className="admin-logo-image"
           />
-          <h1>Lauffer Zeiterfassung</h1>
+          <h1>{APP_DISPLAY_NAME}</h1>
           <p className="admin-logo-subtitle">Admin Panel</p>
         </div>
         <div className="admin-header-controls">
