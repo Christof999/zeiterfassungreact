@@ -8,14 +8,19 @@ Dieses Dokument liegt identisch in `zeiterfassungreact` und `Rechnungsprogramm`.
 
 **Erledigt und gepusht** — Branch `claude/repository-comparison-alignment-lz922s`:
 
-| | |
+| Phase | Stand |
 |---|---|
-| Phase 0 | vollständig, bis auf das Scharfschalten der Firestore-Regeln |
-| Phase 9a | Datenmodell und Rechenlogik des Beleg-Editors, mit Tests |
-| Phase 9b | Standardtexte inkl. Anschreiben und Schlusstext |
-| Phase 9c | Undo/Redo verdrahtet; übrige Bausteine im Repo, noch nicht eingebaut |
+| 0 Fundament | fertig, bis auf das Scharfschalten der Firestore-Regeln |
+| 9a Datenmodell & Rechenlogik | fertig, mit Tests |
+| 9b Standardtexte | fertig |
+| 9c Beleg-Editor | Undo/Redo, Textzeilen, Rabatt/Aufschlag, Kebab-Menüs, PDF-Vorschau — offen: Palette, zusammenklappbare Zeilen, Positionsnummern |
+| 9d Artikelstamm | fertig (Material/Dienstleistung, Einkaufspreis, Marge) |
+| 10 Ausgabe & Agent | PDF für alle drei Belegarten, Agentenmodus mit Handy-Weiche — offen: Ladegrenzen und Caches |
 
-Beide Repos bauen grün, Tests laufen durch (Zeiterfassung 26, Rechnungsprogramm 32).
+Noch nicht begonnen: Phase 1–8 (gemeinsamer Materialstamm, Kommunikation,
+DATEV, Krankheitstage und der Zeiterfassungs-Ausbau).
+
+Rechnungsprogramm: Build grün, 42 Tests. Zeiterfassung: Build grün, 26 Tests.
 An Timos Repos wurde nichts geändert.
 
 ## Entschieden (Vorgabe Christof, 07.08.2026)
@@ -649,13 +654,19 @@ unterschiedlich.
 **9b — Standardtexte**
 - [x] `standardTextService.ts`, `pages/StandardTexts/`, Sidebar-Eintrag
 - [x] `DocumentTextBlock`, `introText`/`closingText` in Rechnung, Angebot und LV (Drag & Drop aus den Standardtexten)
-- [ ] `StandardTextPicker` an den Positionszeilen einblenden (kommt mit 9c)
+- [x] `StandardTextPicker` an den Textzeilen eingeblendet
 
 **9c — Editor-Bedienung**
 - [x] `useUndoableState.ts` (Undo/Redo) in Rechnung und Angebot, mit Tests
 - [x] `CollapsibleLineRow`, `LineAdjustmentFields`, `RowActionsMenu`, `ArticlePalette`, `ArticleDropZone`, `dragConstants` ins Repo geholt
-- [ ] `CollapsibleLineRow` + `LineAdjustmentFields` in den Positionszeilen verdrahten
-- [ ] `RowActionsMenu` in den Listenansichten verdrahten
+- [x] `LineAdjustmentFields` (Rabatt/Aufschlag je Position) verdrahtet
+- [x] Textzeilen (`lineKind: 'text'`) in Rechnung und Angebot anlegen und bearbeiten
+- [ ] `CollapsibleLineRow` (zusammenklappbare Zeilen, „alle auf/zu") verdrahten
+- [ ] `ArticlePalette` mit Drag & Drop an eine bestimmte Position
+- [ ] Laufende Positionsnummern in der Maske anzeigen
+- [ ] Artikel und Standardtext direkt aus dem Editor anlegen
+- [x] `RowActionsMenu` in Rechnungen, Angeboten und Leistungsverzeichnissen
+- [ ] `RowActionsMenu` in Kunden und Artikeln
 - [ ] `ArticlePalette` + `ArticleDropZone` + `dragConstants`, `DraggableDocumentLine` mergen
 - [ ] Laufende Positionsnummern ohne Überschriften/Textbausteine, „alle auf-/zuklappen"
 - [ ] Artikel und Standardtext direkt aus dem Editor anlegen
@@ -667,34 +678,34 @@ Lauffers Ansatz ist ein anderer als Timos. Statt Warenkategorien („Bauchemie /
 Fliesen / Sonstiges") gibt es die Zweiteilung **Dienstleistung vs. Material**.
 Timos Kategorie-Einrichtungshilfe wird dadurch nicht angepasst, sondern **ersetzt**.
 
-- [ ] Umschalter Material / Dienstleistung in `ArticleForm`, gespeichert als `kind` (Feld kommt aus Phase 1)
-- [ ] Filter bzw. getrennte Ansicht in `Articles.tsx` — Material und Leistungen sind unterschiedliche Arbeitsvorgänge
-- [ ] Spalten Verkauf / Einkauf / Marge (€ und %) — bei Dienstleistungen ist Einkauf meist leer, die Marge-Spalte muss das aushalten und leer bleiben statt 100 % anzuzeigen
-- [ ] Sichtbar machen, dass nur Material in der Zeiterfassung buchbar ist (kurzer Hinweis am Umschalter)
-- [ ] Timos Kategorie-Einrichtungshilfe **nicht** übernehmen
+- [x] Umschalter Material / Dienstleistung in `ArticleForm`, gespeichert als `kind` (Feld kommt aus Phase 1)
+- [x] Filter bzw. getrennte Ansicht in `Articles.tsx` — Material und Leistungen sind unterschiedliche Arbeitsvorgänge
+- [x] Spalten Verkauf / Einkauf / Marge (€ und %) — bei Dienstleistungen ist Einkauf meist leer, die Marge-Spalte muss das aushalten und leer bleiben statt 100 % anzuzeigen
+- [x] Sichtbar machen, dass nur Material in der Zeiterfassung buchbar ist (kurzer Hinweis am Umschalter)
+- [x] Timos Kategorie-Einrichtungshilfe **nicht** übernommen
 
 ### Phase 10 — Rechnungsprogramm: Ausgabe & Assistent
-- [ ] `utils/timeFormat.ts` (`isHourUnit`, `formatHoursMinutes`) — Stunden als `7:30` statt `7,5`
-- [ ] `pdfExport.ts` neu aufbauen: **Struktur** von Timo (Angebot + LV + Rechnung, Rabatt/Aufschlag in Euro, Stundenformat, § 14 UStG, mehrseitige Fußzeile), **Layout und Daten** von Lauffer aus `companyProfile`/`CompanyData`
-- [ ] PDF-Vorschau mit „VORSCHAU"-Wasserzeichen aus dem ungespeicherten Formularstand
-- [ ] `utils/imageInput.ts`
+- [x] `utils/timeFormat.ts` (`isHourUnit`, `formatHoursMinutes`) — Stunden als `7:30` statt `7,5`
+- [x] `pdfExport.ts` neu aufgebaut: **Struktur** von Timo (Angebot + LV + Rechnung, Rabatt/Aufschlag in Euro, Stundenformat, § 14 UStG, mehrseitige Fußzeile), **Layout und Daten** von Lauffer aus `companyProfile`/`CompanyData`
+- [x] PDF-Vorschau mit „VORSCHAU"-Wasserzeichen aus dem ungespeicherten Formularstand
+- [x] `utils/imageInput.ts`
 **Agentenmodus — bei Lauffer geräteabhängig**
 
 Timo steuert den Agentenmodus über die Benutzerrolle. Lauffer will ihn **am Handy
 automatisch**, am Rechner nicht. Das ist eine andere Weiche vor demselben Bildschirm:
 
-- [ ] `pages/Agent/AgentMode.tsx` + `assistantConversationService.ts` + Route `/agent` portieren
-- [ ] `AssistantButton` im Agentenmodus ausblenden (Timo prüft dafür `location.pathname !== '/agent'`)
-- [ ] **Automatische Weiche am Handy**: nach dem Anmelden auf `/agent` statt aufs Dashboard, wenn es ein Handy ist
+- [x] `pages/Agent/AgentMode.tsx` + `assistantConversationService.ts` + Route `/agent`
+- [x] `AssistantButton` im Agentenmodus ausgeblendet (Timo prüft dafür `location.pathname !== '/agent'`)
+- [x] **Automatische Weiche am Handy**: nach dem Anmelden auf `/agent` statt aufs Dashboard, wenn es ein Handy ist
   - **Tablets zählen nicht als Handy** — sie bekommen das volle Programm.
   - Erkennung über `matchMedia('(max-width: 640px) and (pointer: coarse)')` — **kein User-Agent-Sniffing**, das altert schlecht.
   - ⚠️ Schwelle bewusst 640px, **nicht** 768px: ein iPad im Hochformat ist exakt 768px breit und würde bei `max-width: 768px` mit eingefangen. Handys liegen bei 360–430px, 640px hält sicheren Abstand nach beiden Seiten.
   - Nur beim **Anmelden** greifen, nicht bei jeder Bildschirmdrehung — sonst wirft es den Benutzer mitten in der Arbeit aus dem Formular.
-- [ ] **Ausweg muss es geben**: sichtbarer Wechsel „Zum vollen Programm" im Agentenmodus, die Wahl in `localStorage` merken und ab dann respektieren. Ohne das ist die Rechnungsbearbeitung am Handy gar nicht mehr erreichbar.
-- [ ] Benutzerrollen `admin` / `agent` in `authService` trotzdem übernehmen — Paul und Christof bleiben, Timos Benutzer nicht. Rolle und Gerät wirken zusammen: Rolle `agent` heißt immer Agentenmodus, `admin` am Handy heißt Agentenmodus mit Ausweg.
-- [ ] `assistantService.ts` mergen: `vorschlag_dokument` / `DocumentProposal` / `createDocumentFromProposal`, `createReviewTaskIfAgent`, Tools für Standardtexte und Nachkalkulation
+- [x] **Ausweg vorhanden**: sichtbarer Wechsel „Zum vollen Programm" im Agentenmodus, die Wahl in `localStorage` merken und ab dann respektieren. Ohne das ist die Rechnungsbearbeitung am Handy gar nicht mehr erreichbar.
+- [x] Benutzerrollen `admin` / `agent` in `authService` — Paul und Christof bleiben, Timos Benutzer nicht. Rolle und Gerät wirken zusammen: Rolle `agent` heißt immer Agentenmodus, `admin` am Handy heißt Agentenmodus mit Ausweg.
+- [x] `assistantService.ts` gemergt: `vorschlag_dokument` / `DocumentProposal` / `createDocumentFromProposal`, `createReviewTaskIfAgent`, Tools für Standardtexte und Nachkalkulation
 - [ ] Performance: Artikel- und Projekt-Cache, `getArticlesByIds`, `getInvoices({ limit })`, `getOffers({ limit })`
-- [ ] `DynamicValue` / `DynamicRecord` flächendeckend statt `any`
+- [ ] `DynamicValue` / `DynamicRecord` in den übrigen Dateien statt `any` (Belegdienste und Agentenansicht erledigt)
 
 ### Phase 11 — Abschluss
 - [ ] Ende-zu-Ende-Test: Angebot → Projekt → Stempeln inkl. **Maschinenbuchung** → Nachkalkulation mit Maschinenkosten → Rechnung
