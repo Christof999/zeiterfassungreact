@@ -15,13 +15,16 @@ Dieses Dokument liegt identisch in `zeiterfassungreact` und `Rechnungsprogramm`.
 | **2 Kommunikation ①** | **fertig** — Angebot legt Baustelle an, Nachkalkulation mit Stunden und Maschinen; zwei Altfehler behoben |
 | **3 DATEV ②** | **fertig** — eigener Tab mit Druckansicht, ohne Rundung |
 | **4 Krankheitstage ③** | **fertig** — Meldung im Urlaubsbereich, im Bericht und im DATEV-Nachweis |
-| 9 Beleg-Editor | Undo/Redo, Textzeilen, Rabatt/Aufschlag, Kebab-Menüs, Vorschau, Artikelstamm — offen: Palette, zusammenklappbare Zeilen, Positionsnummern |
-| 10 Ausgabe & Agent | PDF für alle drei Belegarten, Agentenmodus mit Handy-Weiche |
+| 9 Beleg-Editor | **fertig** — Undo/Redo, Textzeilen, Rabatt/Aufschlag, Palette mit Drag & Drop, zusammenklappbare Zeilen, Positionsnummern, Kebab-Menüs überall, Artikelstamm |
+| 10 Ausgabe & Agent | **fertig** — PDF für alle drei Belegarten, Vorschau, Agentenmodus mit Handy-Weiche |
 
 **Die drei gesetzten Prioritäten sind damit umgesetzt.**
 
-Offen: Phase 5–8 (Rechenkern, Admin-Ausbau, Überstunden, Aufräumen) und die
-Reste aus Phase 9/10.
+**Das Rechnungsprogramm ist damit inhaltlich fertig** — bis auf die Ladegrenzen
+(siehe Phase 10), die eine eigene Aufgabe sind.
+
+Offen bleibt die Zeiterfassung: Phase 5–8 (Rechenkern und restliche Berichte,
+Admin-Ausbau mit Kunden und Dashboard-Kacheln, Überstunden, Aufräumen).
 
 ⚠️ **Vor dem Produktivgang**: `MATERIALSTAMM_MIGRATION.md` im Rechnungsprogramm
 lesen. Die Migration braucht ein Backup beider Firestores und einen Trockenlauf.
@@ -667,12 +670,12 @@ unterschiedlich.
 - [x] `CollapsibleLineRow`, `LineAdjustmentFields`, `RowActionsMenu`, `ArticlePalette`, `ArticleDropZone`, `dragConstants` ins Repo geholt
 - [x] `LineAdjustmentFields` (Rabatt/Aufschlag je Position) verdrahtet
 - [x] Textzeilen (`lineKind: 'text'`) in Rechnung und Angebot anlegen und bearbeiten
-- [ ] `CollapsibleLineRow` (zusammenklappbare Zeilen, „alle auf/zu") verdrahten
-- [ ] `ArticlePalette` mit Drag & Drop an eine bestimmte Position
-- [ ] Laufende Positionsnummern in der Maske anzeigen
-- [ ] Artikel und Standardtext direkt aus dem Editor anlegen
+- [x] `CollapsibleLineRow` (zusammenklappbare Zeilen, „alle auf/zu")
+- [x] `ArticlePalette` mit Drag & Drop an eine bestimmte Position
+- [x] Laufende Positionsnummern in der Maske
+- [x] Artikel und Standardtext direkt aus dem Editor anlegen
 - [x] `RowActionsMenu` in Rechnungen, Angeboten und Leistungsverzeichnissen
-- [ ] `RowActionsMenu` in Kunden und Artikeln
+- [x] `RowActionsMenu` in Kunden und Artikeln
 - [ ] `ArticlePalette` + `ArticleDropZone` + `dragConstants`, `DraggableDocumentLine` mergen
 - [ ] Laufende Positionsnummern ohne Überschriften/Textbausteine, „alle auf-/zuklappen"
 - [ ] Artikel und Standardtext direkt aus dem Editor anlegen
@@ -710,7 +713,8 @@ automatisch**, am Rechner nicht. Das ist eine andere Weiche vor demselben Bildsc
 - [x] **Ausweg vorhanden**: sichtbarer Wechsel „Zum vollen Programm" im Agentenmodus, die Wahl in `localStorage` merken und ab dann respektieren. Ohne das ist die Rechnungsbearbeitung am Handy gar nicht mehr erreichbar.
 - [x] Benutzerrollen `admin` / `agent` in `authService` — Paul und Christof bleiben, Timos Benutzer nicht. Rolle und Gerät wirken zusammen: Rolle `agent` heißt immer Agentenmodus, `admin` am Handy heißt Agentenmodus mit Ausweg.
 - [x] `assistantService.ts` gemergt: `vorschlag_dokument` / `DocumentProposal` / `createDocumentFromProposal`, `createReviewTaskIfAgent`, Tools für Standardtexte und Nachkalkulation
-- [ ] Performance: Artikel- und Projekt-Cache, `getArticlesByIds`, `getInvoices({ limit })`, `getOffers({ limit })`
+- [x] Artikel- und Projekt-Cache, `getArticlesByIds`
+- [ ] ⚠️ **Ladegrenzen nicht angewandt.** `getInvoices({limit})` / `getOffers({limit})` gibt es, aber Dashboard und Listen rechnen und suchen über den vollen Bestand. Eine Grenze würde Statistiken verfälschen und Treffer verstecken. Braucht serverseitige Suche oder „mehr laden“ — eigene Aufgabe, kein Einzeiler. (Bei Timo ebenfalls ungenutzt.)
 - [ ] `DynamicValue` / `DynamicRecord` in den übrigen Dateien statt `any` (Belegdienste und Agentenansicht erledigt)
 
 ### Phase 11 — Abschluss
