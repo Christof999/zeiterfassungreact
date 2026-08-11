@@ -2,36 +2,103 @@ rules_version = '2';
 
 // Firestore-Regeln der Zeiterfassung.
 //
-// ACHTUNG — diese Datei ist noch NICHT in `firebase.json` eingetragen und wird
-// daher von `firebase deploy` bewusst nicht angewandt. Sie hält den heutigen
-// Stand fest, damit die Regeln versioniert im Repository liegen statt nur in der
-// Firebase-Konsole. Vor dem Scharfschalten mit den dort hinterlegten Regeln
-// abgleichen: Weicht diese Datei ab, sperrt ein Deploy die laufende App aus.
+// Diese Datei bildet den in der Firebase-Konsole hinterlegten Stand ab und
+// ergänzt ihn um `materialTypes` — den Materialstamm, den sich Zeiterfassung
+// und Rechnungsprogramm teilen.
 //
-// Zum Aktivieren in `firebase.json` ergänzen:
+// ACHTUNG — die Datei ist NICHT in `firebase.json` eingetragen und wird von
+// `firebase deploy` daher nicht angewandt. Vor dem Scharfschalten mit dem Stand
+// in der Konsole abgleichen: Weicht sie ab, sperrt ein Deploy die laufende App
+// aus. Zum Aktivieren in `firebase.json` ergänzen:
 //   "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" }
-// und anschließend `firebase deploy --only firestore:rules`.
 //
-// Zugriffsmodell: Die App meldet sich anonym an (Firebase Anonymous Auth).
-// Sämtliche Lese- und Schreibzugriffe setzen eine Anmeldung voraus. Eine feinere
-// Trennung (Admin-Claims, getrennte Leserechte je Rolle) ist bewusst noch nicht
-// abgebildet — sie gehört zusammen mit den Admin-Rollen umgesetzt und würde hier
-// sonst mehr versprechen, als die App heute prüft.
+// Zugriffsmodell wie bisher: Die Apps melden sich anonym an (Firebase Anonymous
+// Auth). Schreiben setzt eine Anmeldung voraus; einige Sammlungen sind
+// öffentlich lesbar, weil die Mitarbeiteransicht sie vor der Anmeldung braucht.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Das Rechnungsprogramm liest und schreibt den gemeinsamen Materialstamm
-    // über eine zweite, anonym angemeldete Verbindung. Eigener Block, damit die
-    // Abhängigkeit sichtbar bleibt und beim Verschärfen der Regeln nicht
-    // versehentlich mit abgeschnitten wird.
-    match /materialTypes/{docId} {
+    // Gemeinsamer Materialstamm.
+    //
+    // Im Rechnungsprogramm sind das die „Artikel", hier das „Material" — dieselben
+    // Dokumente. Das Rechnungsprogramm greift über eine zweite, anonym angemeldete
+    // Verbindung zu und legt Artikel auch an, ändert und löscht sie; deshalb
+    // Lese- UND Schreibrecht.
+    //
+    // Ohne diesen Block verweigert Firestore den Zugriff (was keine Regel
+    // erlaubt, ist verboten) — im Rechnungsprogramm bliebe die Artikelliste leer.
+    match /materialTypes/{materialId} {
       allow read, write: if request.auth != null;
     }
 
-    // Alle übrigen Sammlungen: Zeiteinträge, Projekte, Mitarbeiter, Fahrzeuge
-    // und Maschinenbuchungen, Urlaubsanträge, Datei-Uploads, Abrechnungen.
-    match /{document=**} {
+    // Regel für die 'documentation'-Collection
+    match /documentation/{docId} {
       allow read, write: if request.auth != null;
+    }
+
+    // Regel für die 'employees'-Collection
+    match /employees/{employeeId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Regel für die 'fileUploads'-Collection
+    match /fileUploads/{uploadId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Regel für die 'projects'-Collection
+    // Das Rechnungsprogramm legt hier Baustellen aus angenommenen Angeboten an —
+    // gedeckt durch das Schreibrecht für angemeldete Clients.
+    match /projects/{projectId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Regel für die 'test'-Collection
+    match /test/{testId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Regel für die 'timeEntries'-Collection
+    match /timeEntries/{entryId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Zeiterfassungs-Abrechnungen (gespeicherte Korrekturen / Überstunden-Logik im Admin-Bericht)
+    match /timeReportSettlements/{settlementId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Regel für die 'vehicles'-Collection
+    // Wird vom Rechnungsprogramm gelesen, um die Maschinensätze aufzulösen.
+    match /vehicles/{vehicleId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Regel für die 'vehicleUsages'-Collection
+    match /vehicleUsages/{usageId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Regel für die 'leaveRequests'-Collection
+    match /leaveRequests/{requestId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Push-Subscriptions (falls genutzt)
+    match /adminPushSubscriptions/{subscriptionId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Regel für die 'admins'-Collection (falls vorhanden)
+    match /admins/{adminId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
     }
   }
 }
