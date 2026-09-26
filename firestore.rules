@@ -2,15 +2,12 @@ rules_version = '2';
 
 // Firestore-Regeln der Zeiterfassung.
 //
-// Diese Datei bildet den in der Firebase-Konsole hinterlegten Stand ab und
-// ergänzt ihn um `materialTypes` — den Materialstamm, den sich Zeiterfassung
-// und Rechnungsprogramm teilen.
-//
-// ACHTUNG — die Datei ist NICHT in `firebase.json` eingetragen und wird von
-// `firebase deploy` daher nicht angewandt. Vor dem Scharfschalten mit dem Stand
-// in der Konsole abgleichen: Weicht sie ab, sperrt ein Deploy die laufende App
-// aus. Zum Aktivieren in `firebase.json` ergänzen:
-//   "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" }
+// Diese Datei ist die Quelle der veröffentlichten Regeln: Sie ist in
+// `firebase.json` eingetragen und wird mit
+//   firebase deploy --only firestore:rules --project lauffer-zeiterfassung
+// veröffentlicht. Am 26.09.2026 gegen den Stand in der Konsole abgeglichen
+// (inhaltlich identisch) und um `integrations` ergänzt. Änderungen an der
+// Konsole vorbei gehen beim nächsten Deploy verloren.
 //
 // Zugriffsmodell wie bisher: Die Apps melden sich anonym an (Firebase Anonymous
 // Auth). Schreiben setzt eine Anmeldung voraus; einige Sammlungen sind
@@ -101,15 +98,9 @@ service cloud.firestore {
       allow write: if request.auth != null;
     }
 
-    // NEU (DATEV-Nachweis): Einstellungen wie der gemerkte Mail-Empfänger
-    // (integrations/reportEmail). Noch nicht in der Konsole veröffentlicht.
+    // Einstellungen des DATEV-Nachweises, z. B. der gemerkte Mail-Empfänger
+    // (integrations/reportEmail).
     match /integrations/{configId} {
-      allow read, write: if request.auth != null;
-    }
-
-    // NEU (Überstunden): Monatsmeldung des Mitarbeiters, wie viele Stunden
-    // abgerechnet werden sollen. Noch nicht in der Konsole veröffentlicht.
-    match /overtimeSettlements/{settlementId} {
       allow read, write: if request.auth != null;
     }
   }
