@@ -413,6 +413,22 @@ const DatevReportTab: React.FC = () => {
     ]
   )
 
+  /** Für den geladenen Monat schon aufs Konto gebuchte Minuten über 10 Std/Tag. */
+  const alreadyCreditedThisMonth = loadedRange
+    ? Math.max(
+        0,
+        Number(selectedEmployeeRecord?.overtimeCreditsByMonth?.[loadedRange.start.slice(0, 7)]) || 0
+      )
+    : 0
+  /** Was „Abrechnung speichern" für die Stunden über 10 Std/Tag bucht. */
+  const monthCreditDelta = adjustedReport.summary.overLimitMinutes - alreadyCreditedThisMonth
+  const balanceAfterSave = Math.max(
+    0,
+    (overtimeBalanceMinutes ?? 0) +
+      monthCreditDelta -
+      (overtimeMode ? adjustedReport.payoutMinutes : 0)
+  )
+
   /** Tageszeilen der DATEV-Vorlage (eine Zeile je Kalendertag). */
   const datevRows = useMemo(
     () =>
@@ -475,23 +491,46 @@ const DatevReportTab: React.FC = () => {
       dateLabel: entry.date,
       rawMinutes: workMinutesFromOriginalEntry(entry.originalEntry),
       correctedMinutes: entry.effectiveWorkMinutes,
-      paidOutMinutes: Math.max(
-        0,
-        entry.effectiveWorkMinutes -
-          (withoutPayout.entries[index]?.effectiveWorkMinutes ?? entry.effectiveWorkMinutes)
-      )
+      paidOutMinutes: overtimeMode
+        ? Math.max(
+            0,
+            entry.effectiveWorkMinutes -
+              (withoutPayout.entries[index]?.effectiveWorkMinutes ?? entry.effectiveWorkMinutes)
+          )
+        : 0
     }))
 
-    const paidOutMinutes = adjustedReport.payoutMinutes
-    const confirmed = window.confirm(
+    const paidOutMinutes = overtimeMode ? adjustedReport.payoutMinutes : 0
+    // Über 10 Std am Tag: steht nicht im Nachweis, geht aber aufs Konto.
+    // Gebucht wird je Monat – nur bei einem vollen Kalendermonat eindeutig.
+    const month = loadedRange.start.slice(0, 7)
+    const overLimitMinutes = adjustedReport.summary.overLimitMinutes
+    const creditDelta = monthCreditDelta
+
+    const schritte = [
+      creditDelta > 0
+        ? `${minutesToHoursLabel(creditDelta)} Std über 10 Std/Tag aufs Überstundenkonto buchen`
+        : creditDelta < 0
+          ? `${minutesToHoursLabel(-creditDelta)} Std über 10 Std/Tag vom Konto zurückbuchen (Zeiten wurden korrigiert)`
+          : '',
       paidOutMinutes > 0
-        ? `Abrechnung für ${periodLabel(loadedRange)} speichern und ${minutesToHoursLabel(paidOutMinutes)} Überstunden vom Konto abziehen?`
-        : `Abrechnung für ${periodLabel(loadedRange)} ohne Überstunden-Auszahlung speichern?`
+        ? `${minutesToHoursLabel(paidOutMinutes)} Überstunden auszahlen und vom Konto abziehen`
+        : ''
+    ].filter(Boolean)
+    const confirmed = window.confirm(
+      `Abrechnung für ${periodLabel(loadedRange)} speichern?` +
+        (schritte.length > 0 ? `\n\n• ${schritte.join('\n• ')}` : '\n\nDas Überstundenkonto bleibt unverändert.')
     )
     if (!confirmed) return
 
     setIsSavingSettlement(true)
     try {
+      // Erst gutschreiben, dann auszahlen – sonst reicht das Konto ggf. nicht.
+      const gebucht = await DataService.bookOverLimitOvertime(
+        selectedEmployeeId,
+        month,
+        overLimitMinutes
+      )
       await DataService.saveTimeReportSettlement({
         employeeId: selectedEmployeeId,
         periodStart: loadedRange.start,
@@ -501,11 +540,12 @@ const DatevReportTab: React.FC = () => {
         correctedTotalMinutes: adjustedReport.shownTotalMinutes,
         lines
       })
-      toast.success(
-        paidOutMinutes > 0
-          ? `Abrechnung gespeichert. ${minutesToHoursLabel(paidOutMinutes)} Überstunden wurden vom Konto abgezogen.`
-          : 'Abrechnung gespeichert (keine Überstunden zur Auszahlung eingetragen).'
-      )
+      const teile = [
+        gebucht > 0 ? `${minutesToHoursLabel(gebucht)} Std aufs Konto gebucht` : '',
+        gebucht < 0 ? `${minutesToHoursLabel(-gebucht)} Std vom Konto zurückgebucht` : '',
+        paidOutMinutes > 0 ? `${minutesToHoursLabel(paidOutMinutes)} Std ausgezahlt` : ''
+      ].filter(Boolean)
+      toast.success(`Abrechnung gespeichert${teile.length ? ': ' + teile.join(', ') : ''}.`)
       // Den neuen Kontostand nachladen, damit die Anzeige stimmt.
       const fetched = await DataService.getAllEmployees()
       setEmployees(fetched.filter(isReportSelectableEmployee))
@@ -1023,7 +1063,7 @@ const DatevReportTab: React.FC = () => {
               }
             }}
           />
-          <span>Nur Regelarbeitszeit ausweisen (Überstunden bleiben auf dem Konto)</span>
+          <span>Überstunden vom Konto auszahlen (Tage bis zur Regelarbeitszeit auffüllen)</span>
         </label>
         <div className="overtime-facts">
           {overtimeBalanceMinutes !== null && (
@@ -1102,14 +1142,6 @@ const DatevReportTab: React.FC = () => {
                 Zurücksetzen
               </button>
             )}
-            <button
-              type="button"
-              className="btn primary-btn"
-              onClick={() => void handleSaveSettlement()}
-              disabled={isSavingSettlement}
-            >
-              {isSavingSettlement ? 'Speichert…' : 'Abrechnung speichern'}
-            </button>
           </div>
 
           {adjustedReport.payoutMinutes > 0 && (
@@ -1119,12 +1151,7 @@ const DatevReportTab: React.FC = () => {
               {overtimeBalanceMinutes !== null && (
                 <>
                   {' '}Konto nach dem Speichern:{' '}
-                  <strong>
-                    {minutesToHoursLabel(
-                      Math.max(0, overtimeBalanceMinutes - adjustedReport.payoutMinutes)
-                    )}
-                  </strong>
-                  .
+                  <strong>{minutesToHoursLabel(balanceAfterSave)}</strong>.
                 </>
               )}
             </p>
@@ -1141,6 +1168,35 @@ const DatevReportTab: React.FC = () => {
             Stempelsätze und Nachkalkulation bleiben in jedem Fall unberührt.
           </p>
         </>
+      )}
+
+      <div className="overtime-controls">
+        <button
+          type="button"
+          className="btn primary-btn"
+          onClick={() => void handleSaveSettlement()}
+          disabled={isSavingSettlement}
+        >
+          {isSavingSettlement ? 'Speichert…' : 'Abrechnung speichern'}
+        </button>
+      </div>
+      {adjustedReport.summary.overLimitMinutes > 0 && (
+        <p className="overtime-result">
+          Über 10 Std/Tag gearbeitet:{' '}
+          <strong>{minutesToHoursLabel(adjustedReport.summary.overLimitMinutes)} Std</strong> –
+          stehen nicht im Nachweis und gehen beim Speichern aufs Überstundenkonto
+          {monthCreditDelta === 0
+            ? ' (für diesen Monat bereits gebucht).'
+            : alreadyCreditedThisMonth > 0
+              ? ` (bereits gebucht: ${minutesToHoursLabel(alreadyCreditedThisMonth)} Std, es wird nur die Differenz gebucht).`
+              : '.'}
+        </p>
+      )}
+      {(monthCreditDelta !== 0 || (overtimeMode && adjustedReport.payoutMinutes > 0)) && (
+        <p className="overtime-hint">
+          Überstundenkonto nach dem Speichern:{' '}
+          <strong>{minutesToHoursLabel(balanceAfterSave)} Std</strong>
+        </p>
       )}
     </div>
   )

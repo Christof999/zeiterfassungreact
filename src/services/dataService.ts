@@ -2567,6 +2567,44 @@ class DataServiceClass {
   }
 
   /**
+   * Bucht die im Monat über der 10-Std-Grenze gearbeitete Zeit aufs
+   * Überstundenkonto.
+   *
+   * Idempotent: Der gebuchte Wert je Monat steht in `overtimeCreditsByMonth`
+   * am Mitarbeiter, gebucht wird nur die Differenz dazu. Wer eine Abrechnung
+   * nach einer Zeitkorrektur erneut speichert, bekommt also nichts doppelt –
+   * sinkt der Wert, wird entsprechend zurückgebucht (nie unter 0).
+   *
+   * @returns die tatsächlich gebuchte Differenz in Minuten
+   */
+  async bookOverLimitOvertime(employeeId: string, month: string, minutes: number): Promise<number> {
+    await this.authReadyPromise
+    if (!employeeId || !/^\d{4}-\d{2}$/.test(month)) return 0
+    const wanted = Math.max(0, Math.round(Number(minutes) || 0))
+    return runTransaction(db, async (transaction) => {
+      const employeeRef = doc(db, 'employees', employeeId)
+      const snap = await transaction.get(employeeRef)
+      if (!snap.exists()) throw new Error('Mitarbeiter nicht gefunden.')
+      const employee = snap.data() as Employee
+      const credits = { ...(employee.overtimeCreditsByMonth || {}) }
+      const previous = Math.max(0, Math.round(Number(credits[month]) || 0))
+      const delta = wanted - previous
+      if (delta === 0) return 0
+      const balance =
+        typeof employee.overtimeBalanceMinutes === 'number' &&
+        Number.isFinite(employee.overtimeBalanceMinutes)
+          ? employee.overtimeBalanceMinutes
+          : 0
+      credits[month] = wanted
+      transaction.update(employeeRef, {
+        overtimeBalanceMinutes: Math.max(0, balance + delta),
+        overtimeCreditsByMonth: credits
+      })
+      return delta
+    })
+  }
+
+  /**
    * Gemerkter Empfänger für den DATEV-Nachweis (Steuerberater). Liegt in
    * `integrations/reportEmail`, damit alle Admins denselben Empfänger sehen.
    * Solange die Firestore-Regel dafür nicht veröffentlicht ist, merkt sich

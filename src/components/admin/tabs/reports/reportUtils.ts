@@ -545,6 +545,11 @@ export interface ReportSettlementSummary {
   totalPayoutAmount: number
   /** true = Azubi mit Fixlohn; dann steht neben den Zeiten kein Stundensatz. */
   isFixedSalary: boolean
+  /**
+   * Lauffer: Arbeitszeit über der 10-Std-Grenze je Tag. Sie steht nicht im
+   * Nachweis, geht aber beim Speichern der Abrechnung aufs Überstundenkonto.
+   */
+  overLimitMinutes: number
 }
 
 /**
@@ -797,7 +802,10 @@ export const buildAdjustedReport = (
       grossWageAmount,
       taxFreeAmount: mealAllowanceAmount,
       totalPayoutAmount: round2(grossWageAmount + mealAllowanceAmount),
-      isFixedSalary: useFixedSalary
+      isFixedSalary: useFixedSalary,
+      overLimitMinutes: sum(
+        base.days.map((day) => Math.max(0, day.stampedWorkMinutes - day.legalWorkMinutes))
+      )
     }
   }
 }

@@ -42,6 +42,12 @@ export interface Employee {
   }
   /** Optional: Überstunden-Saldo in Minuten (wird bei Zeiterfassungs-Abrechnung reduziert, falls gesetzt). */
   overtimeBalanceMinutes?: number | null
+  /**
+   * Je Monat ("YYYY-MM") bereits aufs Überstundenkonto gebuchte Minuten über
+   * der 10-Std-Grenze. Macht die Buchung wiederholbar: beim erneuten
+   * Speichern wird nur die Differenz gebucht.
+   */
+  overtimeCreditsByMonth?: Record<string, number>
 }
 
 export interface Project {

@@ -264,7 +264,19 @@ export const buildSettlementSummaryLines = (summary: ReportSettlementSummary): S
       detail: hours(summary.openOvertimeMinutes),
       amount: '—',
       isNote: true
-    }
+    },
+    // Lauffer: was über 10 Std am Tag gearbeitet wurde, steht nicht im
+    // Nachweis (Arbeitszeitgesetz), geht aber aufs Überstundenkonto.
+    ...(summary.overLimitMinutes > 0
+      ? [
+          {
+            label: 'Über 10 Std/Tag gearbeitet',
+            detail: `${hours(summary.overLimitMinutes)} – aufs Überstundenkonto, nicht im Bruttolohn`,
+            amount: '—',
+            isNote: true
+          }
+        ]
+      : [])
   ]
 
   return lines

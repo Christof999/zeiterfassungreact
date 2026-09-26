@@ -885,3 +885,48 @@ describe('isReportSelectableEmployee', () => {
     expect(isReportSelectableEmployee(emp({ name: 'Sabine Adminger' }))).toBe(true)
   })
 })
+
+describe('Lauffer: Arbeitszeit über 10 Std/Tag (overLimitMinutes)', () => {
+  const eintrag = (id: string, tag: number, von: string, bis: string): ReportEntry => {
+    const original: TimeEntry = {
+      id,
+      employeeId: 'm1',
+      projectId: 'p1',
+      clockInTime: new Date(2026, 7, tag, Number(von.slice(0, 2)), Number(von.slice(3))),
+      clockOutTime: new Date(2026, 7, tag, Number(bis.slice(0, 2)), Number(bis.slice(3))),
+      pauseTotalTime: 0
+    }
+    return {
+      id,
+      originalEntry: original,
+      source: 'time-entry',
+      date: '',
+      dateRaw: new Date(2026, 7, tag),
+      dateKey: `2026-08-${String(tag).padStart(2, '0')}`,
+      projectId: 'p1',
+      projectName: 'P1',
+      clockIn: von,
+      clockOut: bis,
+      pauseMinutes: 0,
+      pauseMs: 0,
+      workHours: calculateWorkHours(von, bis, 0),
+      notes: '',
+      originalNotes: '',
+      isEdited: false
+    }
+  }
+
+  it('summiert die Minuten über der 10-Std-Grenze, der Nachweis bleibt bei 10 Std', () => {
+    const report = buildAdjustedReport([
+      eintrag('a', 3, '06:00', '18:30'), // 12:30 → 2:30 drüber
+      eintrag('b', 4, '07:00', '16:00'), // 9:00 → nichts drüber
+      eintrag('c', 5, '06:00', '17:00') // 11:00 → 1:00 drüber
+    ])
+    expect(report.summary.overLimitMinutes).toBe(210)
+    expect(report.summary.workMinutes).toBe(10 * 60 + 9 * 60 + 10 * 60)
+  })
+
+  it('ist 0, wenn kein Tag über 10 Std liegt', () => {
+    expect(buildAdjustedReport([eintrag('a', 3, '07:00', '17:00')]).summary.overLimitMinutes).toBe(0)
+  })
+})

@@ -27,6 +27,7 @@ const summary = (overrides: Partial<ReportSettlementSummary> = {}): ReportSettle
   taxFreeAmount: 154,
   totalPayoutAmount: 3258,
   isFixedSalary: false,
+  overLimitMinutes: 0,
   ...overrides
 })
 
@@ -56,5 +57,16 @@ describe('buildSettlementSummaryLines', () => {
 
   it('rechnet die geleisteten Stunden mit dem Kostensatz der Mitarbeiterkarte', () => {
     expect(zeile('Geleistete Arbeitsstunden')?.detail).toBe(`129,33 Std × ${formatCurrency(24)}`)
+  })
+})
+
+describe('Lauffer: Stunden über 10 Std/Tag auf dem Abrechnungsblatt', () => {
+  it('erscheint nur, wenn es solche Stunden gibt – nachrichtlich, ohne Betrag', () => {
+    expect(zeile('Über 10 Std/Tag gearbeitet')).toBeUndefined()
+    const lines = buildSettlementSummaryLines(summary({ overLimitMinutes: 150 }))
+    const line = zeile('Über 10 Std/Tag gearbeitet', lines)
+    expect(line?.isNote).toBe(true)
+    expect(line?.amount).toBe('—')
+    expect(line?.detail).toContain('2,50 Std')
   })
 })
