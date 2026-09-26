@@ -28,3 +28,6 @@ Thumbs.db
 *-backup.*
 *-old.*
 
+
+# Vercel CLI (lokale Verknüpfung)
+.vercel
