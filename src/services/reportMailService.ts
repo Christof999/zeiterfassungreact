@@ -30,6 +30,11 @@ export interface SendReportMailInput {
   reports: ReportMailAttachment[]
   /** true = nur rendern, es geht nichts raus */
   dryRun?: boolean
+  /** 'customer-report' = Leistungsbericht an den Kunden (eigene Mail-Vorlage) */
+  kind?: 'datev' | 'customer-report'
+  /** Nur Leistungsbericht: Projektname und Bestätigungsvermerk in der Mail */
+  projectName?: string
+  signedLabel?: string
 }
 
 /**

@@ -21,7 +21,7 @@ import {
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, auth, storage } from './firebaseConfig'
-import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement, MaterialType } from '../types'
+import type { Employee, Project, TimeEntry, Vehicle, VehicleUsage, FileUpload, LeaveRequest, TimeReportSettlement, MaterialType, CustomerReportRecord } from '../types'
 import { formatDateForInputLocal } from '../utils/dateUtils'
 import { withTimeout } from '../utils/withTimeout'
 import { sanitizeTimeEntryForRead } from '../utils/sanitizeTimeEntry'
@@ -2564,6 +2564,27 @@ class DataServiceClass {
       console.error('Fehler beim Laden der Zeiterfassungs-Abrechnung:', error)
       return null
     }
+  }
+
+  /**
+   * Hält einen erstellten Kundenbericht fest und setzt am Projekt den Beginn
+   * des nächsten Berichtszeitraums. Gleichzeitig werden Kundenzuordnung und
+   * zuletzt bekannte E-Mail am Projekt gemerkt.
+   */
+  async saveCustomerReport(
+    record: Omit<CustomerReportRecord, 'id' | 'createdAt'>,
+    projectUpdate: { customerId?: string; customerEmail?: string } = {}
+  ): Promise<string> {
+    await this.authReadyPromise
+    const payload = Object.fromEntries(
+      Object.entries({ ...record, createdAt: serverTimestamp() }).filter(([, v]) => v !== undefined)
+    )
+    const ref = await addDoc(collection(db, 'customerReports'), payload)
+    await this.updateProject(record.projectId, {
+      lastCustomerReportAt: record.periodEnd,
+      ...Object.fromEntries(Object.entries(projectUpdate).filter(([, v]) => !!v))
+    })
+    return ref.id
   }
 
   /**

@@ -61,6 +61,34 @@ export interface Project {
   description?: string
   isActive?: boolean
   status?: 'active' | 'inactive' | 'aktiv' | 'planned' | 'completed' | 'archived'
+  /**
+   * Kunde im Rechnungsprogramm (Collection `customers` der dortigen Firebase).
+   * Wird beim ersten Kundenbericht über den Kundennamen (`client`) zugeordnet.
+   */
+  customerId?: string
+  /** Letzte bekannte E-Mail des Kunden – führend bleibt der Kunde im Rechnungsprogramm. */
+  customerEmail?: string
+  /** Ende des Zeitraums des zuletzt erstellten Kundenberichts (Start des nächsten). */
+  lastCustomerReportAt?: Date | any
+}
+
+/** Ein erstellter Leistungsbericht für den Kunden (Collection `customerReports`). */
+export interface CustomerReportRecord {
+  id?: string
+  projectId: string
+  periodStart: Date | any | null
+  periodEnd: Date | any
+  totalMinutes: number
+  entryIds: string[]
+  createdByEmployeeId?: string
+  createdByName?: string
+  /** Name der Person, die beim Kunden unterschrieben hat – leer ohne Unterschrift. */
+  signedByName?: string
+  signed: boolean
+  /** An diese Adresse versendet (leer, wenn nur als PDF gesichert). */
+  sentTo?: string
+  savedAsPdf?: boolean
+  createdAt: Date | any
 }
 
 /**

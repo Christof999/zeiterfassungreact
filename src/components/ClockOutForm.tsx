@@ -13,7 +13,7 @@ interface ClockOutFormProps {
   project: Project | null
   clockInTime: Date | null
   onSimpleClockOut: (pauseMinutes: number) => void
-  onExtendedClockOutSuccess: () => void
+  onExtendedClockOutSuccess: (info: { hasReport: boolean; projectId: string }) => void
   onUpdate: () => void
   onProjectSwitch: (newProjectId: string) => Promise<void>
 }
@@ -256,9 +256,9 @@ const ClockOutForm: React.FC<ClockOutFormProps> = ({
             setPauseMsForExtendedModal(null)
             onUpdate()
           }}
-          onClockOutSuccess={() => {
+          onClockOutSuccess={({ hasReport }) => {
             setPauseMsForExtendedModal(null)
-            onExtendedClockOutSuccess()
+            onExtendedClockOutSuccess({ hasReport, projectId: timeEntry.projectId })
           }}
         />
       )}

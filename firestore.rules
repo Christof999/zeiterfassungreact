@@ -103,5 +103,10 @@ service cloud.firestore {
     match /integrations/{configId} {
       allow read, write: if request.auth != null;
     }
+
+    // Erstellte Leistungsberichte für Kunden (nach dem Ausstempeln mit Bericht).
+    match /customerReports/{reportId} {
+      allow read, write: if request.auth != null;
+    }
   }
 }

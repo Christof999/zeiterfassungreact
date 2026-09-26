@@ -7,6 +7,7 @@ import ClockOutForm from './ClockOutForm'
 import ManualTimeEntryModal from './ManualTimeEntryModal'
 import RetroactiveDocumentationListModal from './RetroactiveDocumentationListModal'
 import RecentActivities from './RecentActivities'
+import CustomerReportModal from './CustomerReportModal'
 import { canAddManualTimeEntries } from '../constants/manualTimeEntry'
 import { getDelegateUsernames } from '../constants/stampForDelegates'
 import NavigationMenu from './NavigationMenu'
@@ -32,6 +33,8 @@ const TimeTracking: React.FC = () => {
   const [showManualEntryModal, setShowManualEntryModal] = useState(false)
   const [showRetroDocListModal, setShowRetroDocListModal] = useState(false)
   const [activitiesRefreshKey, setActivitiesRefreshKey] = useState(0)
+  /** Projekt, für das nach dem Ausstempeln ein Kundenbericht angeboten wird. */
+  const [customerReportProjectId, setCustomerReportProjectId] = useState<string | null>(null)
   const [clockInProjects, setClockInProjects] = useState<Project[]>([])
   const [isClockingIn, setIsClockingIn] = useState(false)
   const navigate = useNavigate()
@@ -375,7 +378,12 @@ const TimeTracking: React.FC = () => {
               project={currentProject}
               clockInTime={clockInTime}
               onSimpleClockOut={handleSimpleClockOut}
-              onExtendedClockOutSuccess={resetClockOutState}
+              onExtendedClockOutSuccess={({ hasReport, projectId }) => {
+                resetClockOutState()
+                // Wer mit Bericht ausstempelt, wird gefragt, ob der Kunde einen
+                // Leistungsbericht bekommen soll.
+                if (hasReport && projectId) setCustomerReportProjectId(projectId)
+              }}
               onProjectSwitch={handleProjectSwitch}
               onUpdate={() => {
                 DataService.getCurrentTimeEntry(viewedEmployee!.id!).then(async (entry) => {
@@ -428,6 +436,14 @@ const TimeTracking: React.FC = () => {
             currentTimeEntry={currentTimeEntry}
             onClose={() => setShowRetroDocListModal(false)}
             onDocumentationSaved={() => setActivitiesRefreshKey((k) => k + 1)}
+          />
+        )}
+
+        {customerReportProjectId && (
+          <CustomerReportModal
+            projectId={customerReportProjectId}
+            currentUser={currentUser}
+            onClose={() => setCustomerReportProjectId(null)}
           />
         )}
       </main>

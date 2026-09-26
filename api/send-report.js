@@ -1,7 +1,8 @@
 const { initializeApp, cert, getApps } = require('firebase-admin/app')
 const { getAuth } = require('firebase-admin/auth')
 
-// Versand des Zeiterfassungsberichts per E-Mail.
+// Versand des DATEV-Nachweises (an die Lohnbuchhaltung) und des
+// Leistungsberichts (an den Kunden) per E-Mail.
 //
 // Diese Function ist ein schlanker Proxy zum Email-Proxy: Sie hält den
 // EMAILPROXY_KEY serverseitig geheim (im Browser-Bundle hätte er nichts zu
@@ -119,8 +120,15 @@ module.exports = async (req, res) => {
     reportHtml,
     attachmentFilename,
     reports,
-    dryRun
+    dryRun,
+    kind,
+    projectName,
+    signedLabel
   } = req.body || {}
+
+  // Zwei Arten: der DATEV-Nachweis an die Lohnbuchhaltung (Standard) und der
+  // Leistungsbericht an den Kunden. Beide nutzen die Lauffer-Vorlagen im Proxy.
+  const istKundenbericht = kind === 'customer-report'
 
   if (!isValidEmail(to)) {
     res.status(400).json({ error: 'Bitte eine gültige Empfängeradresse angeben.' })
@@ -189,15 +197,24 @@ module.exports = async (req, res) => {
       },
       body: JSON.stringify({
         to,
-        template: 'zeitbericht',
-        variables: {
-          employeeName: employeeName || 'Mitarbeiter',
-          periodLabel: periodLabel || '',
-          totalHours: totalHours || '0:00',
-          grossWage: grossWage || '0,00 €',
-          note: note || '',
-          senderName: senderName || 'Lauffer'
-        },
+        template: istKundenbericht ? 'lauffer-kundenbericht' : 'lauffer-zeitbericht',
+        variables: istKundenbericht
+          ? {
+              projectName: projectName || 'Ihr Projekt',
+              periodLabel: periodLabel || '',
+              totalHours: totalHours || '0,00',
+              signedLabel: signedLabel || 'ohne Unterschrift',
+              note: note || '',
+              senderName: senderName || 'Lauffer'
+            }
+          : {
+              employeeName: employeeName || 'Mitarbeiter',
+              periodLabel: periodLabel || '',
+              totalHours: totalHours || '0:00',
+              grossWage: grossWage || '0,00 €',
+              note: note || '',
+              senderName: senderName || 'Lauffer'
+            },
         attachments,
         dryRun: dryRun === true
       })

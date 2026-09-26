@@ -1,0 +1,187 @@
+/* Leistungsbericht für den Kunden (nach dem Ausstempeln mit Bericht) */
+
+.customer-report-modal {
+  max-width: 640px;
+  width: 100%;
+}
+
+.customer-report-review {
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.customer-report-body {
+  padding: var(--spacing-lg, 20px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md, 14px);
+}
+
+.customer-report-body h3 {
+  margin: var(--spacing-sm, 8px) 0 0;
+  font-size: 1rem;
+}
+
+.customer-report-body p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.customer-report-period {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--spacing-md, 14px);
+  color: var(--text-secondary);
+}
+
+.customer-report-period label,
+.customer-report-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-sm, 0.875rem);
+  color: var(--text-secondary);
+}
+
+.customer-report-field input,
+.customer-report-field textarea,
+.customer-report-period input {
+  font: inherit;
+  font-size: 1rem;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  background: var(--card-background);
+  color: var(--text-color);
+}
+
+.customer-report-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-sm, 0.875rem);
+}
+
+.customer-report-hint {
+  font-size: var(--font-size-sm, 0.875rem);
+  color: var(--text-secondary);
+}
+
+.customer-report-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--spacing-md, 14px);
+  border: 1px solid var(--border-light, #e5e7eb);
+  border-left: 4px solid var(--primary-color);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--light-color);
+}
+
+.customer-report-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.customer-report-summary > div:first-child {
+  font-size: 1.1rem;
+  margin-bottom: 4px;
+}
+
+.customer-report-days details {
+  border-bottom: 1px solid var(--border-light, #e5e7eb);
+  padding: 8px 0;
+}
+
+.customer-report-days summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.customer-report-row,
+.customer-report-note {
+  margin: 6px 0 0 12px !important;
+  font-size: var(--font-size-sm, 0.875rem);
+  white-space: pre-wrap;
+}
+
+.customer-report-note {
+  color: var(--text-secondary);
+}
+
+.customer-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--spacing-sm, 8px);
+  margin-top: var(--spacing-sm, 8px);
+}
+
+/* Unterschriftsfeld */
+.signature-pad {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.signature-pad-canvas {
+  width: 100%;
+  height: 180px;
+  border: 2px dashed var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  background: #ffffff;
+  /* Beim Unterschreiben darf die Seite nicht scrollen oder zoomen. */
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.signature-pad-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--font-size-sm, 0.875rem);
+  color: var(--text-secondary);
+}
+
+@media (max-width: 600px) {
+  .customer-report-actions {
+    flex-direction: column-reverse;
+  }
+
+  .customer-report-actions .btn {
+    width: 100%;
+  }
+}
+
+.customer-report-customer {
+  font-size: var(--font-size-sm, 0.875rem);
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--primary-dark, #059669);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+.customer-report-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm, 8px);
+}
+
+.customer-report-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.customer-report-suggestions .btn {
+  text-align: left;
+  justify-content: flex-start;
+}

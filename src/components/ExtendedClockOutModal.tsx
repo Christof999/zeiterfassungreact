@@ -14,7 +14,8 @@ interface ExtendedClockOutModalProps {
   /** Gesamte Pausenzeit in Millisekunden (vom übergeordneten Formular, inkl. 0) */
   pauseTotalTimeMs: number
   onClose: () => void
-  onClockOutSuccess: () => void
+  /** hasReport = es wurde ein Berichtstext geschrieben (Anlass für den Kundenbericht). */
+  onClockOutSuccess: (info: { hasReport: boolean }) => void
 }
 
 type VehicleBookingRow = {
@@ -179,7 +180,7 @@ const ExtendedClockOutModal: React.FC<ExtendedClockOutModalProps> = ({
         toast.success('Erfolgreich ausgestempelt mit Dokumentation!')
       }
 
-      onClockOutSuccess()
+      onClockOutSuccess({ hasReport: notes.trim().length > 0 })
       onClose()
     } catch (error: any) {
       toast.error('Fehler beim Ausstempeln: ' + error.message)
