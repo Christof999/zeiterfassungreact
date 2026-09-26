@@ -11,7 +11,7 @@ import {
   calculateWorkHours,
   workMinutesFromParts,
   minutesToHoursLabel
-} from './reports/reportCalc'
+} from './reports/reportUtils'
 import '../../../styles/AdminTabs.css'
 import '../../../styles/ReportPrint.css'
 

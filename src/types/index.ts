@@ -15,7 +15,23 @@ export interface Employee {
   firstName?: string
   lastName?: string
   hourlyWage?: number
+  /**
+   * In der Maske „Stundenlohn", enthält in den Bestandsdaten aber
+   * Verrechnungssätze. Fließt deshalb NICHT in den Lohn des DATEV-Nachweises.
+   */
   hourlyRate?: number
+  /** Lohn je Stunde (EUR) – einzige Grundlage der Beträge im DATEV-Nachweis. */
+  hourlyCostRate?: number
+  /** Lohnnebenkosten (EUR/Std) – nur interne Kalkulation, nie auf dem Lohnbeleg. */
+  ancillaryWageCosts?: number
+  /** Verpflegungsmehraufwand in EUR je Tag mit mind. 8 Std Anwesenheit. */
+  mealAllowanceRate?: number
+  /** Auszubildender: wird nicht nach Stunden, sondern über einen Fixlohn vergütet. */
+  isApprentice?: boolean
+  /** Fixe monatliche Vergütung (EUR) – gilt nur für Auszubildende. */
+  fixedMonthlySalary?: number
+  /** Personalnummer aus der Lohnbuchhaltung – steht im DATEV-Nachweis. */
+  personnelNumber?: string
   position?: string
   isAdmin?: boolean
   status?: 'active' | 'inactive'
@@ -78,6 +94,21 @@ export interface TimeEntry {
   locationOut?: { lat: number | null; lng: number | null } | null
   notes?: string
   pauseTotalTime?: number
+  /**
+   * Fahrtzeit-Gutschrift (ms) aus der Timo-Linie. Lauffer schreibt das Feld
+   * nicht; es wird nur gelesen und ist damit immer leer (siehe `returnTravel.ts`).
+   */
+  returnTravelCreditMs?: number
+  /**
+   * Aus dem Überstundenkonto auf die Regelarbeitszeit aufgefüllte Minuten.
+   * Wird vom Mitarbeiter selbst gebucht und dabei vom Überstundenkonto
+   * abgezogen; im Zeiterfassungsbericht zählt die Zeit wie geleistete Arbeit,
+   * in der Projekt-Nachkalkulation nicht. Liegt immer auf dem letzten
+   * abgeschlossenen Stempelsatz des Tages.
+   */
+  overtimeFillMinutes?: number
+  /** Zeitpunkt der Auffüll-Buchung (Audit-Trail). */
+  overtimeFillAt?: Date | any
   pauseDetails?: Array<{
     start: any
     end: any

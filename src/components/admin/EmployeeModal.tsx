@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { DataService } from '../../services/dataService'
 import type { Employee } from '../../types'
 import { toast } from '../ToastContainer'
+import { DEFAULT_MEAL_ALLOWANCE_EUR } from './tabs/reports/reportUtils'
 import '../../styles/Modal.css'
 
 interface EmployeeModalProps {
@@ -20,7 +21,12 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({ employee, onClose, onSave
     position: '',
     status: 'active' as 'active' | 'inactive',
     hourlyRate: 0,
-    overtimeBalanceHours: '' as string
+    overtimeBalanceHours: '' as string,
+    personnelNumber: '',
+    hourlyCostRate: 0,
+    mealAllowanceRate: DEFAULT_MEAL_ALLOWANCE_EUR,
+    isApprentice: false,
+    fixedMonthlySalary: 0
   })
   const [isLoading, setIsLoading] = useState(false)
 
@@ -58,7 +64,15 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({ employee, onClose, onSave
         position: employee.position || '',
         status: (employee.status as 'active' | 'inactive') || 'active',
         hourlyRate: employee.hourlyRate || employee.hourlyWage || 0,
-        overtimeBalanceHours
+        overtimeBalanceHours,
+        personnelNumber: employee.personnelNumber || '',
+        hourlyCostRate: employee.hourlyCostRate || 0,
+        mealAllowanceRate:
+          typeof employee.mealAllowanceRate === 'number'
+            ? employee.mealAllowanceRate
+            : DEFAULT_MEAL_ALLOWANCE_EUR,
+        isApprentice: employee.isApprentice === true,
+        fixedMonthlySalary: employee.fixedMonthlySalary || 0
       })
     } else {
       // Reset form when no employee (new employee)
@@ -71,7 +85,12 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({ employee, onClose, onSave
         position: '',
         status: 'active',
         hourlyRate: 0,
-        overtimeBalanceHours: ''
+        overtimeBalanceHours: '',
+        personnelNumber: '',
+        hourlyCostRate: 0,
+        mealAllowanceRate: DEFAULT_MEAL_ALLOWANCE_EUR,
+        isApprentice: false,
+        fixedMonthlySalary: 0
       })
     }
   }, [employee])
@@ -88,7 +107,14 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({ employee, onClose, onSave
         username: formData.username,
         position: formData.position,
         status: formData.status,
-        hourlyRate: formData.hourlyRate
+        hourlyRate: formData.hourlyRate,
+        personnelNumber: formData.personnelNumber.trim(),
+        hourlyCostRate: formData.hourlyCostRate,
+        mealAllowanceRate: formData.mealAllowanceRate,
+        isApprentice: formData.isApprentice,
+        // Der Fixlohn gilt nur für Azubis – sonst würde ein alter Wert beim
+        // Zurückstufen weiter in den Bruttolohn rutschen.
+        fixedMonthlySalary: formData.isApprentice ? formData.fixedMonthlySalary : 0
       }
 
       const trimmedOt = formData.overtimeBalanceHours.trim()
@@ -187,6 +213,73 @@ const EmployeeModal: React.FC<EmployeeModalProps> = ({ employee, onClose, onSave
               onChange={(e) => setFormData({ ...formData, hourlyRate: parseFloat(e.target.value) || 0 })}
             />
           </div>
+          <div className="form-group">
+            <label>Personalnummer:</label>
+            <input
+              type="text"
+              value={formData.personnelNumber}
+              onChange={(e) => setFormData({ ...formData, personnelNumber: e.target.value })}
+            />
+            <small className="form-hint">Steht im DATEV-Nachweis unter „Pers.-Nr.".</small>
+          </div>
+          <div className="form-group">
+            <label>Lohn für die Abrechnung (€/Std):</label>
+            <input
+              type="number"
+              step="0.01"
+              value={formData.hourlyCostRate}
+              onChange={(e) =>
+                setFormData({ ...formData, hourlyCostRate: parseFloat(e.target.value) || 0 })
+              }
+            />
+            <small className="form-hint">
+              Bruttostundenlohn des Mitarbeiters – Grundlage der Beträge im DATEV-Nachweis.
+              Unabhängig vom Stundenlohn oben; ohne Eintrag bleiben die Beträge 0.
+            </small>
+          </div>
+          <div className="form-group">
+            <label>Verpflegungsmehraufwand (€/Tag):</label>
+            <input
+              type="number"
+              step="0.01"
+              value={formData.mealAllowanceRate}
+              onChange={(e) =>
+                setFormData({ ...formData, mealAllowanceRate: parseFloat(e.target.value) || 0 })
+              }
+            />
+            <small className="form-hint">
+              Steuerfreier Satz je Tag mit mindestens 8 Std Anwesenheit. Vorgabe im DATEV-Nachweis,
+              dort je Bericht überschreibbar. 0 ist zulässig.
+            </small>
+          </div>
+          <div className="form-group">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={formData.isApprentice}
+                onChange={(e) => setFormData({ ...formData, isApprentice: e.target.checked })}
+                style={{ width: 'auto', minHeight: 0 }}
+              />
+              Azubi (Vergütung als Fixlohn statt nach Stunden)
+            </label>
+          </div>
+          {formData.isApprentice && (
+            <div className="form-group">
+              <label>Fixlohn (€/Monat):</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.fixedMonthlySalary}
+                onChange={(e) =>
+                  setFormData({ ...formData, fixedMonthlySalary: parseFloat(e.target.value) || 0 })
+                }
+              />
+              <small className="form-hint">
+                Monatliche Ausbildungsvergütung. Im DATEV-Nachweis stehen dann nur die Zeiten – ohne
+                Stundensatz – und der Fixlohn als Bruttolohn.
+              </small>
+            </div>
+          )}
           <div className="form-group">
             <label>Überstunden-Saldo (Stunden, optional):</label>
             <input

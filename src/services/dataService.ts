@@ -2495,7 +2495,15 @@ class DataServiceClass {
     return `${employeeId}_${periodStart}_${periodEnd}`.replace(/\//g, '-')
   }
 
-  async saveTimeReportSettlement(data: Omit<TimeReportSettlement, 'id' | 'settledAt'>): Promise<void> {
+  /**
+   * @param options.alreadyBookedMinutes Minuten, die das Überstundenkonto schon
+   *   anderweitig bewegt haben (z. B. durch die Meldung des Mitarbeiters). Nur
+   *   der Rest wird hier noch abgezogen – sonst würde doppelt gebucht.
+   */
+  async saveTimeReportSettlement(
+    data: Omit<TimeReportSettlement, 'id' | 'settledAt'>,
+    options: { alreadyBookedMinutes?: number } = {}
+  ): Promise<void> {
     await this.authReadyPromise
     const id = this.settlementDocId(data.employeeId, data.periodStart, data.periodEnd)
     const settlementRef = doc(db, 'timeReportSettlements', id)
@@ -2522,8 +2530,14 @@ class DataServiceClass {
       if (empSnap.exists()) {
         const emp = empSnap.data() as Employee
         const paid = Number(data.paidOutMinutes) || 0
-        if (emp.overtimeBalanceMinutes != null && typeof emp.overtimeBalanceMinutes === 'number') {
-          const next = Math.max(0, emp.overtimeBalanceMinutes - paid)
+        const alreadyBooked = Math.max(0, Number(options.alreadyBookedMinutes) || 0)
+        const toBook = Math.max(0, paid - alreadyBooked)
+        if (
+          toBook > 0 &&
+          emp.overtimeBalanceMinutes != null &&
+          typeof emp.overtimeBalanceMinutes === 'number'
+        ) {
+          const next = Math.max(0, emp.overtimeBalanceMinutes - toBook)
           await updateDoc(empRef, { overtimeBalanceMinutes: next })
         }
       }

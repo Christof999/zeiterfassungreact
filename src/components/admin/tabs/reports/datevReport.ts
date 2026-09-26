@@ -1,39 +1,5 @@
-import { minutesToHoursLabel } from './reportCalc'
+import { enumerateDays, minutesToHoursLabel, type AdjustedReportEntry } from './reportUtils'
 import { formatDateForInputLocal } from '../../../../utils/dateUtils'
-
-/** Abwesenheitsarten, die im DATEV-Nachweis ein Kürzel bekommen. */
-export type AbsenceKind = 'vacation' | 'holiday' | 'sick'
-
-/**
- * Was der DATEV-Nachweis je Zeiteintrag braucht.
- *
- * Bewusst nur diese Felder statt des vollen Berichtseintrags: Der Nachweis
- * arbeitet mit den **gespeicherten, minutengenauen** Zeiten der Zeiterfassung.
- * Es wird nichts gerundet und keine Pause rechnerisch angehoben.
- */
-export interface DatevSourceEntry {
-  dateKey: string
-  clockIn: string
-  /** Gehen-Zeit laut Eintrag. */
-  effectiveClockOut: string
-  effectiveWorkMinutes: number
-  effectivePauseMinutes: number
-  absenceKind?: AbsenceKind
-}
-
-/** Alle Kalendertage zwischen zwei Datumsangaben (einschließlich). */
-function enumerateDays(start: Date, end: Date): Date[] {
-  const days: Date[] = []
-  const cur = new Date(start)
-  cur.setHours(12, 0, 0, 0)
-  const last = new Date(end)
-  last.setHours(12, 0, 0, 0)
-  while (cur <= last) {
-    days.push(new Date(cur))
-    cur.setDate(cur.getDate() + 1)
-  }
-  return days
-}
 
 /**
  * Aufbereitung für den DATEV-Nachweis „Vorlage zur Dokumentation der täglichen
@@ -43,10 +9,15 @@ function enumerateDays(start: Date, end: Date): Date[] {
  * Kalendertag** – mehrere Stempelungen eines Tages (Projektwechsel) werden
  * deshalb zu Beginn/Ende/Pause/Dauer zusammengefasst. Projekt und
  * Dokumentation kommen bewusst nicht vor.
+ *
+ * Abwesenheitstage (Urlaub, Krank, Feiertag, Berufsschule) stehen mit ihrer
+ * Regelarbeitszeit in der Dauer und in der Summe – das Blatt weist damit die
+ * bezahlten Stunden des Monats aus, nicht nur die gestempelten. Woher die
+ * Stunden kommen, sagt das Kürzel in der "*"-Spalte.
  */
 
 /** Kürzel der DATEV-Vorlage für die mit „*" überschriebene Spalte. */
-export type DatevKey = '' | 'K' | 'U' | 'UU' | 'F' | 'SA' | 'SU'
+export type DatevKey = '' | 'K' | 'U' | 'UU' | 'F' | 'SA' | 'SU' | 'S'
 
 export const DATEV_KEY_LEGEND: Array<{ key: Exclude<DatevKey, ''>; label: string }> = [
   { key: 'K', label: 'Krank' },
@@ -54,7 +25,10 @@ export const DATEV_KEY_LEGEND: Array<{ key: Exclude<DatevKey, ''>; label: string
   { key: 'UU', label: 'unbezahlter Urlaub' },
   { key: 'F', label: 'Feiertag' },
   { key: 'SA', label: 'Stundenweise abwesend' },
-  { key: 'SU', label: 'Stundenweise Urlaub' }
+  { key: 'SU', label: 'Stundenweise Urlaub' },
+  // Nicht Teil der DATEV-Vorlage, aber von der Lohnbuchhaltung ausdrücklich
+  // gewünscht: bei Azubis soll erkennbar sein, warum nicht gearbeitet wurde.
+  { key: 'S', label: 'Berufsschule' }
 ]
 
 export interface DatevDayRow {
@@ -74,13 +48,15 @@ export interface DatevDayRow {
 const KEY_BY_ABSENCE: Record<string, DatevKey> = {
   sick: 'K',
   vacation: 'U',
-  holiday: 'F'
+  holiday: 'F',
+  school: 'S'
 }
 
 const REMARK_BY_ABSENCE: Record<string, string> = {
   sick: 'Krank',
   vacation: 'Urlaub',
-  holiday: 'Feiertag'
+  holiday: 'Feiertag',
+  school: 'Berufsschule'
 }
 
 /** "07:00" → 420; ungültig → null. Für den frühesten/spätesten Zeitpunkt. */
@@ -98,7 +74,7 @@ const toMinutes = (value: string): number | null => {
  * das Formular wie die Vorlage lückenlos von 1 bis 31 durchläuft.
  */
 export const buildDatevRows = (
-  entries: DatevSourceEntry[],
+  entries: AdjustedReportEntry[],
   startDate: string,
   endDate: string
 ): DatevDayRow[] => {
@@ -106,7 +82,7 @@ export const buildDatevRows = (
   const end = new Date(`${endDate}T12:00:00`)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return []
 
-  const byDay = new Map<string, DatevSourceEntry[]>()
+  const byDay = new Map<string, AdjustedReportEntry[]>()
   for (const entry of entries) {
     const list = byDay.get(entry.dateKey)
     if (list) list.push(entry)
@@ -121,18 +97,22 @@ export const buildDatevRows = (
     let spaetester: number | null = null
     let pauseMinutes = 0
     let workMinutes = 0
+    /** Regelstunden eines Abwesenheitstags – zählen nur, wenn nicht gestempelt wurde. */
+    let absenceMinutes = 0
     let key: DatevKey = ''
     const bemerkungen: string[] = []
 
     for (const entry of tagesEintraege) {
       if (entry.absenceKind) {
-        // Urlaub, Krankheit und Feiertag sind keine Arbeitszeit: Das Blatt
-        // dokumentiert nach ArbZG die geleistete Arbeit, dafür gibt es die
-        // Kürzel-Spalte. Die Dauer bleibt leer, damit die Summe unten der
-        // gemeldeten Stundenzahl entspricht.
+        // Urlaub, Krankheit, Feiertag und Berufsschule sind bezahlte Tage: die
+        // Regelarbeitszeit (Mo–Do 8 Std, Fr 6 Std) steht in der Dauer und zählt
+        // in die Summe. Das Kürzel in der "*"-Spalte sagt weiterhin, warum an
+        // dem Tag nicht gestempelt wurde. Beginn und Ende bleiben leer – es
+        // gibt keine Kommen-/Gehen-Zeit.
         key = KEY_BY_ABSENCE[entry.absenceKind] || key
         const label = REMARK_BY_ABSENCE[entry.absenceKind]
         if (label && !bemerkungen.includes(label)) bemerkungen.push(label)
+        absenceMinutes = Math.max(absenceMinutes, entry.effectiveWorkMinutes)
         continue
       }
 
@@ -143,6 +123,11 @@ export const buildDatevRows = (
       if (beginn !== null) fruehester = fruehester === null ? beginn : Math.min(fruehester, beginn)
       if (ende !== null) spaetester = spaetester === null ? ende : Math.max(spaetester, ende)
     }
+
+    // Ein Tag ist entweder gearbeitet oder abwesend. Falls doch beides
+    // vorliegt (z.B. halber Tag gestempelt), gewinnt die echte Arbeitszeit –
+    // sonst stünden auf einem Tag 8 Std Urlaub plus die gestempelten Stunden.
+    if (workMinutes === 0) workMinutes = absenceMinutes
 
     const alsUhrzeit = (minuten: number | null): string =>
       minuten === null ? '' : minutesToHoursLabel(minuten).padStart(5, '0')

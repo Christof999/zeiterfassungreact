@@ -13,6 +13,9 @@
 /** Vollständiger Produktname (Kopfzeilen, Anmeldung, Startbildschirm). */
 export const APP_DISPLAY_NAME = 'Lauffer Zeiterfassung'
 
+/** Firmenname auf Nachweisen und Berichten (DATEV-Nachweis, Abrechnung, Mail-Absender). */
+export const APP_COMPANY_NAME = 'Lauffer'
+
 /** Untertitel unter dem Produktnamen – die Geschäftsfelder. */
 export const APP_TAGLINE = 'Gartenbau • Erdbau • Natursteinhandel'
 

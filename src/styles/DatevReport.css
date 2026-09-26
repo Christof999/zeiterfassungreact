@@ -1,0 +1,505 @@
+/* DATEV-Nachweis: Überstunden-Panel, Sammellauf, Mail-Versand und Abrechnung.
+   Übernommen aus timo_Zeiterfassung (ReportPrint.css), ergänzt die Lauffer-Stile.
+   Der Rest (report-filters, report-table …) kommt aus ReportPrint.css. */
+
+/* Nur auf schmalen Schirmen sichtbar (siehe Media Query weiter unten). */
+.report-scroll-hint {
+  display: none;
+  margin: 0 0 var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+.overtime-panel {
+  background: var(--light-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+  font-size: var(--font-size-sm);
+}
+
+.overtime-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm) var(--spacing-lg);
+}
+
+.overtime-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+
+.overtime-toggle input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.overtime-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  color: var(--text-secondary);
+}
+
+/* DATEV-Nachweis: schlanke Tagestabelle */
+.datev-table td,
+.datev-table th {
+  text-align: center;
+}
+
+.datev-table td:last-child,
+.datev-table th:last-child {
+  text-align: left;
+}
+
+.datev-table tbody tr.datev-key-row {
+  background: var(--light-color);
+}
+
+.datev-legend {
+  margin: var(--spacing-md) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+/* Meldung des Mitarbeiters zur Abrechnung des Monats */
+.employee-report-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  border: 1px solid var(--border-light);
+  border-left: 4px solid var(--primary-color);
+  border-radius: var(--radius-lg);
+  background: var(--card-background);
+}
+
+.employee-report-note-text {
+  flex: 1 1 320px;
+}
+
+.employee-report-note-text h4 {
+  margin: 0 0 4px;
+  font-size: var(--font-size-md, 1rem);
+}
+
+.employee-report-note-text p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.employee-report-note-state {
+  margin-top: 4px !important;
+}
+
+/* Meldung passt nicht zum Zeitraum – zurückhaltender als die eigentliche. */
+.employee-report-note-other {
+  border-left-color: var(--text-muted, #9CA3AF);
+}
+
+.employee-report-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+/* Sammellauf: Auswertung für alle Mitarbeiter des Zeitraums */
+.batch-trigger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px dashed var(--border-light);
+}
+
+.batch-trigger-option {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs, 6px);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.batch-trigger-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+/* Blätter-Leiste über dem Bericht */
+.batch-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border: 1px solid var(--border-light);
+  border-left: 4px solid var(--primary-color);
+  border-radius: var(--radius-lg);
+  background: var(--card-background);
+}
+
+.batch-pager-arrow {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+  line-height: 1;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--background-secondary, #f5f5f5);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.batch-pager-arrow:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.batch-pager-info {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+}
+
+.batch-pager-count,
+.batch-pager-period {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+/* Nimmt der Mitarbeiter am Sammeldruck/-versand teil? */
+.batch-pager-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+/* Abgewählt: die Leiste tritt sichtbar zurück, damit beim Durchblättern sofort
+   auffällt, dass dieser Bericht nicht mit rausgeht. */
+.batch-pager.is-skipped {
+  border-left-color: var(--text-muted, #9ca3af);
+  background: var(--background-secondary, #f5f5f5);
+}
+
+.batch-pager.is-skipped .batch-pager-info > strong,
+.batch-pager.is-skipped .batch-pager-count,
+.batch-pager.is-skipped .batch-pager-period {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.batch-pager-warning {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--danger-color, #dc2626);
+}
+
+.batch-pager-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+/* E-Mail-Versand des Berichts */
+.report-mail-panel {
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  background: var(--card-background);
+}
+
+.report-mail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.report-mail-head h4 {
+  margin: 0;
+  font-size: var(--font-size-md, 1rem);
+}
+
+.report-mail-attachment {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.report-mail-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.report-mail-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 260px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.report-mail-field input,
+.report-mail-field textarea {
+  width: 100%;
+  font-family: inherit;
+}
+
+.report-mail-note {
+  margin-bottom: var(--spacing-md);
+}
+
+.report-mail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.report-mail-hint {
+  flex: 1 1 260px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+/* Vom Mitarbeiter selbst verrechnete Stunden – eigene Zeile, weil der Satz
+   erklärt, warum das Konto beim Speichern unberührt bleibt. */
+.overtime-selfbooked {
+  flex-basis: 100%;
+}
+
+.overtime-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+}
+
+.overtime-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+.overtime-input {
+  width: 90px;
+}
+
+.overtime-result,
+.overtime-warning,
+.overtime-hint {
+  margin: var(--spacing-sm) 0 0;
+}
+
+.overtime-result {
+  color: var(--text-color);
+}
+
+.overtime-warning {
+  color: var(--warning-color, #b26a00);
+  font-weight: var(--font-weight-semibold);
+}
+
+.overtime-hint {
+  color: var(--text-secondary);
+}
+
+.meal-rate-field {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--text-secondary);
+}
+
+.settlement-summary {
+  margin-top: var(--spacing-lg);
+  page-break-inside: avoid;
+}
+
+.settlement-summary h4 {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-md, 1rem);
+}
+
+.settlement-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.settlement-summary-table td {
+  border-bottom: 1px solid var(--border-color);
+  padding: var(--spacing-sm);
+}
+
+.settlement-summary-table td:first-child {
+  font-weight: var(--font-weight-semibold);
+}
+
+.settlement-summary-table td:nth-child(2) {
+  color: var(--text-secondary);
+}
+
+/* Summenzeilen (Bruttolohn, Auszahlung) müssen sich vom Rest abheben – sie sind
+   die Zahlen, die an den Steuerberater gemeldet werden. */
+.settlement-summary-table tr.settlement-total td {
+  border-top: 2px solid var(--text-color);
+  font-weight: var(--font-weight-bold);
+}
+
+.settlement-summary-table tr.settlement-total td:nth-child(2) {
+  font-weight: 400;
+}
+
+/* Nachrichtliche Zeilen gehören nicht zur Meldesumme. */
+.settlement-summary-table tr.settlement-note td,
+.settlement-summary-table tr.settlement-note td:first-child {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.settlement-summary-hint {
+  margin: var(--spacing-sm) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+@media (max-width: 768px) {
+  .report-table-container {
+    border-radius: var(--radius-md);
+  }
+
+  .report-scroll-hint {
+    display: block;
+  }
+
+  .report-mail-actions,
+  .report-mail-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* In der Spalte wirkt flex-basis als HÖHE: aus „mindestens 320px breit"
+     würde „mindestens 320px hoch" und damit eine riesige Lücke vor dem Knopf. */
+  .report-mail-field,
+  .report-mail-hint {
+    flex: 0 0 auto;
+  }
+
+  .report-mail-row > .btn,
+  .report-mail-actions > .btn,
+  .batch-trigger > .btn {
+    width: 100%;
+  }
+
+  /* Pfeile bleiben links und rechts vom Namen, die Knöpfe kommen darunter.
+     Ohne das Schrumpfen-Dürfen (min-width: 0) drückt der Namensblock die
+     Pfeile auf eigene Zeilen – dann steht „‹" allein über dem Namen. */
+  .batch-pager {
+    padding: var(--spacing-md);
+    gap: var(--spacing-sm);
+  }
+
+  .batch-pager-info {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .batch-pager-actions {
+    flex: 1 1 100%;
+  }
+
+  /* auto statt 0: drei Knöpfe nebeneinander würden auf schmalen Schirmen die
+     Beschriftung zerquetschen – lieber umbrechen. */
+  .batch-pager-actions > .btn {
+    flex: 1 1 auto;
+  }
+
+  .overtime-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* Basis ist flex-direction: column – ohne das Zurücksetzen verteilt
+     space-between Beschriftung und Eingabe senkrecht über die halbe Seite. */
+  .overtime-controls label {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+  }
+
+  /* 0 1 statt 0 0: das Feld darf unter 96px schrumpfen, sonst schiebt eine
+     lange Beschriftung es auf schmalen Schirmen aus dem Container. */
+  .overtime-controls .overtime-input {
+    width: auto;
+    flex: 0 1 96px;
+    max-width: 96px;
+  }
+
+  .overtime-controls .btn {
+    width: 100%;
+  }
+
+  /* Flex-Kinder haben min-width:auto und schrumpfen sonst nicht unter ihren
+     Inhalt – schon ein langes Wort schiebt den Container über den Rand. */
+  .overtime-panel-head > *,
+  .overtime-facts > * {
+    min-width: 0;
+  }
+
+  .overtime-facts {
+    width: 100%;
+  }
+
+  .meal-rate-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .meal-rate-field .overtime-input {
+    width: auto;
+    flex: 0 1 96px;
+    max-width: 96px;
+  }
+}

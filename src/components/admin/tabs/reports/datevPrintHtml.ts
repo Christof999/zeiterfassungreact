@@ -1,16 +1,6 @@
-import { minutesToHoursLabel } from './reportCalc'
+import { escapeHtml, minutesToDecimalHours, type ReportSettlementSummary } from './reportUtils'
 import { DATEV_KEY_LEGEND, datevTotalMinutes, type DatevDayRow } from './datevReport'
-import { APP_DISPLAY_NAME } from '../../../../constants/appBranding'
-
-/** HTML-Sonderzeichen maskieren – der Ausdruck wird als Zeichenkette gebaut. */
-function escapeHtml(value: string): string {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
+import { buildSettlementSummaryHtml, COMPANY_NAME } from './printHtml'
 
 /**
  * Druck-HTML im Aufbau der DATEV-Vorlage „Dokumentation der täglichen
@@ -26,6 +16,7 @@ export interface DatevPrintParams {
   periodLabel: string
   companyName?: string
   /** Abrechnungsblock – kommt auf ein eigenes Blatt hinter den Nachweis. */
+  summary?: ReportSettlementSummary
 }
 
 /**
@@ -33,9 +24,10 @@ export interface DatevPrintParams {
  * Baustein mehrfach in ein Sammel-Dokument („Alle drucken") passt.
  */
 const buildDatevBodyHtml = (params: DatevPrintParams): string => {
-  const company = params.companyName || APP_DISPLAY_NAME
+  const company = params.companyName || COMPANY_NAME
   const esc = escapeHtml
-  const zeit = (minutes: number): string => (minutes > 0 ? minutesToHoursLabel(minutes) : '')
+  // Dezimalstunden statt 0:45 – die Lohnbuchhaltung rechnet so weiter.
+  const zeit = (minutes: number): string => (minutes > 0 ? minutesToDecimalHours(minutes) : '')
 
   const rowsHtml = params.rows
     .map(
@@ -81,7 +73,7 @@ const buildDatevBodyHtml = (params: DatevPrintParams): string => {
     <tfoot>
       <tr>
         <td colspan="4" class="center">Summe:</td>
-        <td class="center">${esc(minutesToHoursLabel(datevTotalMinutes(params.rows)))}</td>
+        <td class="center">${esc(minutesToDecimalHours(datevTotalMinutes(params.rows)))}</td>
         <td colspan="3"></td>
       </tr>
     </tfoot>
@@ -106,7 +98,16 @@ const buildDatevBodyHtml = (params: DatevPrintParams): string => {
       </div>
       <div class="eintraege">${legende}</div>
     </div>
+  </div>
+${
+    params.summary
+      ? `
+  <div class="abrechnung-seite">
+    <div class="abrechnung-kopf">${esc(params.employeeName || '-')} · ${esc(params.periodLabel)}</div>
+    ${buildSettlementSummaryHtml(params.summary)}
   </div>`
+      : ''
+  }`
 }
 
 /** Stylesheet des DATEV-Nachweises – einmal je Dokument, auch im Sammeldruck. */

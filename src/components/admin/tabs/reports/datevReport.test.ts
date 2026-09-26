@@ -1,123 +1,180 @@
 import { describe, it, expect } from 'vitest'
-import { buildDatevRows, datevTotalMinutes, type DatevSourceEntry } from './datevReport'
+import { buildDatevRows, datevTotalMinutes } from './datevReport'
+import type { AdjustedReportEntry } from './reportUtils'
 
-function entry(over: Partial<DatevSourceEntry> & { dateKey: string }): DatevSourceEntry {
-  return {
-    clockIn: '',
-    effectiveClockOut: '',
-    effectiveWorkMinutes: 0,
-    effectivePauseMinutes: 0,
-    ...over,
-  }
-}
+const zeile = (
+  tag: number,
+  overrides: Partial<AdjustedReportEntry> = {}
+): AdjustedReportEntry =>
+  ({
+    id: `e${tag}-${overrides.clockIn || 'x'}`,
+    originalEntry: {} as any,
+    source: 'time-entry',
+    date: `${tag}.07.2026`,
+    dateRaw: new Date(2026, 6, tag),
+    dateKey: `2026-07-${String(tag).padStart(2, '0')}`,
+    projectId: 'p1',
+    projectName: 'Projekt A',
+    clockIn: '07:00',
+    clockOut: '16:00',
+    pauseMinutes: 30,
+    pauseMs: 0,
+    workHours: '8:30',
+    notes: '',
+    originalNotes: '',
+    isEdited: false,
+    effectivePauseMinutes: 30,
+    effectiveClockOut: '16:00',
+    effectiveWorkMinutes: 8 * 60 + 30,
+    effectiveWorkHours: '8:30',
+    workTimeAdjustments: [],
+    ...overrides
+  }) as AdjustedReportEntry
 
 describe('buildDatevRows', () => {
-  it('liefert eine Zeile je Kalendertag, auch ohne Buchung', () => {
-    const rows = buildDatevRows([], '2026-04-01', '2026-04-30')
-    expect(rows).toHaveLength(30)
+  it('liefert eine Zeile je Kalendertag – auch für Tage ohne Buchung', () => {
+    const rows = buildDatevRows([zeile(3)], '2026-07-01', '2026-07-31')
+    expect(rows).toHaveLength(31)
     expect(rows[0].day).toBe(1)
-    expect(rows[29].day).toBe(30)
+    expect(rows[30].day).toBe(31)
+    // Leerer Tag bleibt leer, damit das Formular durchläuft wie die Vorlage
+    expect(rows[0]).toMatchObject({ begin: '', end: '', workMinutes: 0, key: '' })
   })
 
-  it('übernimmt Beginn, Ende, Pause und Dauer eines Arbeitstags', () => {
-    const rows = buildDatevRows(
-      [
-        entry({
-          dateKey: '2026-04-02',
-          clockIn: '07:00',
-          effectiveClockOut: '16:30',
-          effectiveWorkMinutes: 540,
-          effectivePauseMinutes: 30,
-        }),
-      ],
-      '2026-04-01',
-      '2026-04-03'
-    )
-    const row = rows.find((r) => r.dateKey === '2026-04-02')!
-    expect(row.begin).toBe('07:00')
-    expect(row.end).toBe('16:30')
-    expect(row.pauseMinutes).toBe(30)
-    expect(row.workMinutes).toBe(540)
+  it('übernimmt Beginn, Pause, Ende und Dauer eines Arbeitstags', () => {
+    const rows = buildDatevRows([zeile(3)], '2026-07-01', '2026-07-31')
+    expect(rows[2]).toMatchObject({
+      day: 3,
+      begin: '07:00',
+      end: '16:00',
+      pauseMinutes: 30,
+      workMinutes: 8 * 60 + 30,
+      key: ''
+    })
   })
 
-  // Der DATEV-Nachweis hat genau eine Zeile je Tag. Wer vormittags auf der einen
-  // und nachmittags auf der anderen Baustelle war, erscheint trotzdem einmal.
-  it('fasst mehrere Stempelungen eines Tages zusammen', () => {
+  it('fasst mehrere Stempelungen eines Tages zu einer Zeile zusammen', () => {
+    // Projektwechsel: die Vorlage hat nur eine Zeile je Tag, also frühestes
+    // Kommen, spätestes Gehen, Pausen und Dauern aufaddiert.
     const rows = buildDatevRows(
       [
-        entry({
-          dateKey: '2026-04-02',
+        zeile(6, {
           clockIn: '07:00',
           effectiveClockOut: '11:00',
-          effectiveWorkMinutes: 240,
           effectivePauseMinutes: 0,
+          effectiveWorkMinutes: 4 * 60
         }),
-        entry({
-          dateKey: '2026-04-02',
-          clockIn: '12:00',
-          effectiveClockOut: '17:00',
-          effectiveWorkMinutes: 270,
+        zeile(6, {
+          clockIn: '11:30',
+          effectiveClockOut: '16:30',
           effectivePauseMinutes: 30,
-        }),
+          effectiveWorkMinutes: 4 * 60 + 30
+        })
       ],
-      '2026-04-02',
-      '2026-04-02'
+      '2026-07-06',
+      '2026-07-06'
     )
     expect(rows).toHaveLength(1)
-    // Früheste Kommen- und späteste Gehen-Zeit des Tages
-    expect(rows[0].begin).toBe('07:00')
-    expect(rows[0].end).toBe('17:00')
-    expect(rows[0].workMinutes).toBe(510)
-    expect(rows[0].pauseMinutes).toBe(30)
+    expect(rows[0]).toMatchObject({
+      begin: '07:00',
+      end: '16:30',
+      pauseMinutes: 30,
+      workMinutes: 8 * 60 + 30
+    })
   })
 
   it('setzt die Kürzel der Vorlage für Abwesenheiten', () => {
     const rows = buildDatevRows(
       [
-        entry({ dateKey: '2026-04-01', absenceKind: 'sick' }),
-        entry({ dateKey: '2026-04-02', absenceKind: 'vacation' }),
-        entry({ dateKey: '2026-04-03', absenceKind: 'holiday' }),
+        zeile(1, { absenceKind: 'vacation', effectiveWorkMinutes: 8 * 60 }),
+        zeile(2, { absenceKind: 'sick', effectiveWorkMinutes: 8 * 60 }),
+        zeile(3, { absenceKind: 'holiday', effectiveWorkMinutes: 8 * 60 })
       ],
-      '2026-04-01',
-      '2026-04-03'
+      '2026-07-01',
+      '2026-07-03'
     )
-    expect(rows[0].key).toBe('K')
-    expect(rows[1].key).toBe('U')
-    expect(rows[2].key).toBe('F')
+    expect(rows.map((r) => r.key)).toEqual(['U', 'K', 'F'])
+    expect(rows.map((r) => r.remark)).toEqual(['Urlaub', 'Krank', 'Feiertag'])
   })
 
-  it('lässt Tage ohne Buchung leer', () => {
-    const rows = buildDatevRows([], '2026-04-01', '2026-04-02')
-    expect(rows[0].key).toBe('')
-    expect(rows[0].begin).toBe('')
-    expect(rows[0].workMinutes).toBe(0)
+  it('weist bei Urlaub die Regelstunden aus, ohne Kommen- und Gehen-Zeit', () => {
+    const rows = buildDatevRows(
+      [zeile(1, { absenceKind: 'vacation', effectiveWorkMinutes: 8 * 60 })],
+      '2026-07-01',
+      '2026-07-01'
+    )
+    expect(rows[0]).toMatchObject({
+      begin: '',
+      end: '',
+      pauseMinutes: 0,
+      workMinutes: 8 * 60,
+      key: 'U'
+    })
   })
 
-  it('gibt bei ungültigem Zeitraum nichts zurück', () => {
-    expect(buildDatevRows([], '2026-04-30', '2026-04-01')).toEqual([])
-    expect(buildDatevRows([], 'unsinn', '2026-04-01')).toEqual([])
+  it('übernimmt am Freitag die kürzere Regelarbeitszeit', () => {
+    // 03.07.2026 ist ein Freitag: 6 Std statt 8. Die Minuten kommen aus dem
+    // Bericht, die Vorlage rechnet sie nicht selbst aus.
+    const rows = buildDatevRows(
+      [zeile(3, { absenceKind: 'vacation', effectiveWorkMinutes: 6 * 60 })],
+      '2026-07-03',
+      '2026-07-03'
+    )
+    expect(rows[0]).toMatchObject({ workMinutes: 6 * 60, key: 'U' })
   })
-})
 
-describe('datevTotalMinutes', () => {
-  it('summiert die Arbeitsminuten aller Tage', () => {
+  it('zählt auch Krank, Feiertag und Berufsschule mit ihren Stunden', () => {
     const rows = buildDatevRows(
       [
-        entry({ dateKey: '2026-04-01', clockIn: '07:00', effectiveClockOut: '15:00', effectiveWorkMinutes: 480 }),
-        entry({ dateKey: '2026-04-02', clockIn: '07:00', effectiveClockOut: '13:00', effectiveWorkMinutes: 360 }),
+        zeile(1, { absenceKind: 'sick', effectiveWorkMinutes: 8 * 60 }),
+        zeile(2, { absenceKind: 'holiday', effectiveWorkMinutes: 8 * 60 }),
+        zeile(3, { absenceKind: 'school', effectiveWorkMinutes: 6 * 60 })
       ],
-      '2026-04-01',
-      '2026-04-02'
+      '2026-07-01',
+      '2026-07-03'
     )
-    expect(datevTotalMinutes(rows)).toBe(840)
+    expect(rows.map((r) => r.workMinutes)).toEqual([8 * 60, 8 * 60, 6 * 60])
+    expect(datevTotalMinutes(rows)).toBe(22 * 60)
   })
 
-  it('zählt Abwesenheitstage nicht als Arbeitszeit', () => {
+  it('nimmt Abwesenheits- und Arbeitsstunden in die Summe', () => {
     const rows = buildDatevRows(
-      [entry({ dateKey: '2026-04-01', absenceKind: 'sick' })],
-      '2026-04-01',
-      '2026-04-01'
+      [
+        zeile(1),
+        zeile(2),
+        zeile(3, { absenceKind: 'vacation', effectiveWorkMinutes: 8 * 60 })
+      ],
+      '2026-07-01',
+      '2026-07-03'
     )
-    expect(datevTotalMinutes(rows)).toBe(0)
+    expect(datevTotalMinutes(rows)).toBe(2 * (8 * 60 + 30) + 8 * 60)
+  })
+
+  it('zählt an einem Tag mit Stempelung nicht zusätzlich die Urlaubsstunden', () => {
+    // Sonst stünden auf einem Tag die gestempelten Stunden plus 8 Std Urlaub.
+    const rows = buildDatevRows(
+      [
+        zeile(1),
+        zeile(1, { absenceKind: 'vacation', effectiveWorkMinutes: 8 * 60 })
+      ],
+      '2026-07-01',
+      '2026-07-01'
+    )
+    expect(rows[0]).toMatchObject({ workMinutes: 8 * 60 + 30, key: 'U' })
+  })
+
+  it('nennt kein Projekt – die Vorlage hat dafür keine Spalte', () => {
+    const rows = buildDatevRows([zeile(3)], '2026-07-03', '2026-07-03')
+    expect(JSON.stringify(rows)).not.toContain('Projekt A')
+  })
+
+  it('summiert die Dauer über den Zeitraum', () => {
+    const rows = buildDatevRows([zeile(3), zeile(4)], '2026-07-01', '2026-07-31')
+    expect(datevTotalMinutes(rows)).toBe(2 * (8 * 60 + 30))
+  })
+
+  it('gibt bei unsinnigem Zeitraum nichts zurück', () => {
+    expect(buildDatevRows([], '2026-07-31', '2026-07-01')).toEqual([])
+    expect(buildDatevRows([], '', '')).toEqual([])
   })
 })

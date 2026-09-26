@@ -1,160 +1,351 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { DataService } from '../../../services/dataService'
-import type { Employee, LeaveRequest, TimeEntry } from '../../../types'
+import type { Employee, Project, TimeEntry } from '../../../types'
 import { toast } from '../../ToastContainer'
-import { getEmployeeDisplayName } from '../../../utils/employeeDisplayName'
 import { getBavariaHolidayName } from '../../../utils/bavariaHolidays'
-import { formatDateForInputLocal } from '../../../utils/dateUtils'
-import { convertToDate } from '../../../services/data/shared'
-import { msToMinutes, workMinutesFromParts, minutesToHoursLabel } from './reports/reportCalc'
-import { buildDatevRows, datevTotalMinutes, type DatevSourceEntry } from './reports/datevReport'
-import { buildDatevPrintHtml } from './reports/datevPrintHtml'
+import { roundTimeToStep } from '../../../utils/timeRounding'
+import { parseHoursMinutesInput } from '../../../utils/hoursInput'
+import {
+  currentMonthKey,
+  monthKeyLabel,
+  monthRange
+} from '../../../utils/overtimeMonth'
+import {
+  DEFAULT_REGULAR_WORK_TIME,
+  regularMinutesForDate,
+  regularMinutesForDateKey,
+  type RegularWorkTimeConfig
+} from '../../../utils/regularWorkTime'
+import {
+  type AbsenceKind,
+  type AdjustedReportEntry,
+  type BuildAdjustedReportOptions,
+  type ReportEntry,
+  buildAdjustedReport,
+  calculateWorkHours,
+  convertToDate,
+  DEFAULT_MEAL_ALLOWANCE_EUR,
+  employeeWageRate,
+  entryCreditMinutes,
+  enumerateDays,
+  formatDateForDisplay,
+  formatTimeForInput,
+  getApprovedLeaveDates,
+  getDateKey,
+  isReportSelectableEmployee,
+  isWeekendDate,
+  minutesToDecimalHours,
+  minutesToHoursLabel,
+  msToMinutes,
+  parseMealAllowanceInput,
+  workMinutesFromOriginalEntry
+} from './reports/reportUtils'
+import { buildDatevRows, DATEV_KEY_LEGEND, datevTotalMinutes } from './reports/datevReport'
+import {
+  buildDatevBatchPrintHtml,
+  buildDatevPrintHtml,
+  type DatevPrintParams
+} from './reports/datevPrintHtml'
+import { buildSettlementSummaryLines } from './reports/printHtml'
 import '../../../styles/AdminTabs.css'
+import '../../../styles/ReportPrint.css'
+import '../../../styles/DatevReport.css'
 
 /**
- * Zeiterfassungsbericht im Aufbau der DATEV-Vorlage „Dokumentation der
- * täglichen Arbeitszeit".
+ * DATEV-Nachweis „Dokumentation der täglichen Arbeitszeit" samt Abrechnung.
  *
- * Rechnet mit den **gespeicherten, minutengenauen** Zeiten: Gehen − Kommen −
- * Pause, wie im gewöhnlichen Zeiterfassungsbericht. Es wird nichts auf ein
- * Raster gerundet und keine Pause rechnerisch angehoben — die Zahlen hier
- * müssen zum anderen Bericht passen.
+ * Aufgebaut wie der DATEV-Nachweis der Timo-Linie: Die gespeicherten
+ * Stempelzeiten laufen durch dieselbe Berichtslogik (`reportUtils`) – Kommen/
+ * Gehen im 15-Minuten-Raster, gesetzliche Pause (30/45 Min) aufgeschlagen,
+ * 10-Std-Grenze je Tag. Urlaub, Krankheit und Feiertage stehen mit der
+ * Regelarbeitszeit (Lauffer: 10 Std) in der Summe.
+ *
+ * All das ist reine Darstellung. Gespeichert wird hier nur, was ausdrücklich
+ * per Knopf abgerechnet wird (Überstunden-Auszahlung) – die Stempelsätze selbst
+ * bleiben unverändert.
  */
 const DatevReportTab: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([])
-  const [employeeId, setEmployeeId] = useState('')
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
-  const [rows, setRows] = useState<ReturnType<typeof buildDatevRows>>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
+  const [selectedEmployeeName, setSelectedEmployeeName] = useState('')
+  const [month, setMonth] = useState(currentMonthKey)
+  const [reportEntries, setReportEntries] = useState<ReportEntry[]>([])
+  /** Zeitraum, zu dem `reportEntries` geladen wurden – unabhängig vom Monatsfeld. */
+  const [loadedRange, setLoadedRange] = useState<{ start: string; end: string } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
 
+  // Überstunden-Modus: weist nur die Regelarbeitszeit aus und verteilt einen
+  // bewusst eingegebenen Auszahlungsbetrag auf die Zeilen.
+  const [overtimeMode, setOvertimeMode] = useState(false)
+  const [regularMonThuInput, setRegularMonThuInput] = useState(() =>
+    minutesToHoursLabel(DEFAULT_REGULAR_WORK_TIME.monThu)
+  )
+  const [regularFriInput, setRegularFriInput] = useState(() =>
+    minutesToHoursLabel(DEFAULT_REGULAR_WORK_TIME.fri)
+  )
+  const [mealAllowanceInput, setMealAllowanceInput] = useState(String(DEFAULT_MEAL_ALLOWANCE_EUR))
+  const [payoutInput, setPayoutInput] = useState('0:00')
+  /** Übernommener Auszahlungsbetrag – erst „In Zeilen übernehmen" setzt ihn. */
+  const [appliedPayoutMinutes, setAppliedPayoutMinutes] = useState(0)
+  const [isSavingSettlement, setIsSavingSettlement] = useState(false)
+
+  // ---- Sammellauf „Nachweis für alle" ----
+  /** Mitarbeiter mit mindestens einer Stempelung im Monat, in Blätter-Reihenfolge. */
+  const [batchEmployeeIds, setBatchEmployeeIds] = useState<string[]>([])
+  const [batchIndex, setBatchIndex] = useState(0)
+  /** Wer beim Sammeldruck dabei ist. Startet mit allen, abgewählt wird beim Blättern. */
+  const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set())
+  /** Zeitraum des Sammellaufs – eingefroren, damit ein geändertes Monatsfeld ihn nicht verschiebt. */
+  const [batchPeriod, setBatchPeriod] = useState<{ start: string; end: string } | null>(null)
+  const [isBatchLoading, setIsBatchLoading] = useState(false)
+  const [batchPrintProgress, setBatchPrintProgress] = useState<number | null>(null)
+
+  /** Regelarbeitszeit Mo–Do / Fr; ungültige Eingaben fallen auf den Standard (10:00) zurück. */
+  const regularWorkTimeConfig: RegularWorkTimeConfig = useMemo(
+    () => ({
+      monThu: parseHoursMinutesInput(regularMonThuInput) ?? DEFAULT_REGULAR_WORK_TIME.monThu,
+      fri: parseHoursMinutesInput(regularFriInput) ?? DEFAULT_REGULAR_WORK_TIME.fri
+    }),
+    [regularMonThuInput, regularFriInput]
+  )
+  const mealAllowanceRate = parseMealAllowanceInput(mealAllowanceInput)
+
   useEffect(() => {
-    DataService.getAllEmployees()
-      .then((list) => setEmployees(list.filter((e) => e.status !== 'inactive')))
-      .catch((error) => console.error('Fehler beim Laden der Mitarbeiter:', error))
+    Promise.all([DataService.getAllEmployees(), DataService.getAllProjects()])
+      .then(([fetchedEmployees, fetchedProjects]) => {
+        setEmployees(fetchedEmployees.filter(isReportSelectableEmployee))
+        setProjects(fetchedProjects)
+      })
+      .catch((error) => {
+        console.error('Fehler beim Laden:', error)
+        toast.error('Fehler beim Laden der Daten')
+      })
   }, [])
 
-  const monthBounds = () => {
-    const [y, m] = month.split('-').map(Number)
-    const start = new Date(y, m - 1, 1, 0, 0, 0, 0)
-    const end = new Date(y, m, 0, 23, 59, 59, 999)
-    return { start, end }
+  /**
+   * Mitarbeiter auswählen und seinen Verpflegungssatz als Vorgabe ins Feld
+   * holen. Der Satz bleibt überschreibbar – gepflegt wird er an der
+   * Mitarbeiterkarte.
+   */
+  const selectEmployee = (employeeId: string) => {
+    setSelectedEmployeeId(employeeId)
+    const satz = employees.find((e) => e.id === employeeId)?.mealAllowanceRate
+    setMealAllowanceInput(
+      String(typeof satz === 'number' ? satz : DEFAULT_MEAL_ALLOWANCE_EUR).replace('.', ',')
+    )
   }
 
-  const formatTime = (date: Date | null): string =>
-    date
-      ? date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false })
-      : ''
+  const employeeDisplayName = (employeeId: string): string => {
+    const emp = employees.find((e) => e.id === employeeId)
+    return emp ? emp.name || `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : ''
+  }
 
-  /** Bezahlte Abwesenheitstage (Urlaub, Krankheit) als Belegzeilen. */
-  const absenceEntries = (
-    requests: LeaveRequest[],
-    type: 'vacation' | 'sick',
-    start: Date,
-    end: Date,
-    occupied: Set<string>
-  ): DatevSourceEntry[] => {
-    const out: DatevSourceEntry[] = []
-    const seen = new Set<string>()
-    for (const request of requests) {
-      if (request.status !== 'approved' || request.type !== type) continue
-      const reqStart = convertToDate(request.startDate)
-      const reqEnd = convertToDate(request.endDate)
-      if (!reqStart || !reqEnd) continue
+  const getProjectName = (projectId: string): string =>
+    projects.find((p) => p.id === projectId)?.name || projectId
 
-      const cur = new Date(Math.max(reqStart.setHours(12, 0, 0, 0), start.getTime()))
-      cur.setHours(12, 0, 0, 0)
-      const last = new Date(Math.min(reqEnd.setHours(12, 0, 0, 0), end.getTime()))
-      last.setHours(12, 0, 0, 0)
+  /**
+   * Baut die Berichtszeilen eines Mitarbeiters: gestempelte Zeiten plus die
+   * bezahlten Abwesenheiten (Feiertag, Urlaub, Krankheit).
+   *
+   * Reine Berichtsnachträge (`documentationOnlyEntry`) bleiben draußen: Sie
+   * tragen keine Arbeitszeit und würden sonst den Tag belegen und einen Urlaub
+   * oder Feiertag verdrängen.
+   */
+  const loadReportEntriesFor = async (
+    employeeId: string,
+    von: string,
+    bis: string
+  ): Promise<ReportEntry[]> => {
+    const start = new Date(`${von}T00:00:00`)
+    const end = new Date(`${bis}T23:59:59.999`)
 
-      while (cur <= last) {
-        const dateKey = formatDateForInputLocal(cur)
-        const day = cur.getDay()
-        const isWeekend = day === 0 || day === 6
-        const cancelled = (request.cancelledDates || []).some(
-          (k) => String(k).slice(0, 10) === dateKey
-        )
-        if (!isWeekend && !occupied.has(dateKey) && !cancelled && !seen.has(dateKey)) {
-          seen.add(dateKey)
-          out.push({
-            dateKey,
-            clockIn: '',
-            effectiveClockOut: '',
-            // Bezahlte Abwesenheit: keine Ist-Arbeitszeit, aber ein Kürzel im Nachweis.
-            effectiveWorkMinutes: 0,
-            effectivePauseMinutes: 0,
-            absenceKind: type,
-          })
-        }
-        cur.setDate(cur.getDate() + 1)
+    const [allEntries, leaveRequests] = await Promise.all([
+      DataService.getTimeEntriesByEmployeeId(employeeId, { from: start, to: end }),
+      DataService.getLeaveRequestsByEmployee(employeeId)
+    ])
+
+    const filteredEntries = allEntries
+      .filter((entry: TimeEntry) => {
+        if (entry.documentationOnlyEntry) return false
+        const entryDate = convertToDate(entry.clockInTime)
+        return !!entryDate && entryDate >= start && entryDate <= end
+      })
+      .sort(
+        (a: TimeEntry, b: TimeEntry) =>
+          (convertToDate(a.clockInTime)?.getTime() || 0) -
+          (convertToDate(b.clockInTime)?.getTime() || 0)
+      )
+
+    const entries: ReportEntry[] = filteredEntries.map((entry: TimeEntry) => {
+      const clockInDate = convertToDate(entry.clockInTime)
+      const clockOutDate = convertToDate(entry.clockOutTime)
+      // Zeiten auf das 15-Min-Raster glätten – nur für den Nachweis, der
+      // Stempelsatz bleibt minutengenau gespeichert.
+      const clockIn = formatTimeForInput(roundTimeToStep(clockInDate))
+      const clockOut = formatTimeForInput(roundTimeToStep(clockOutDate))
+      const pauseMs = entry.pauseTotalTime || 0
+      const pauseMinutes = msToMinutes(pauseMs)
+
+      return {
+        id: entry.id,
+        originalEntry: entry,
+        source: 'time-entry',
+        date: clockInDate ? formatDateForDisplay(clockInDate) : '-',
+        dateRaw: clockInDate,
+        dateKey: clockInDate ? getDateKey(clockInDate) : '',
+        projectId: entry.projectId,
+        projectName: getProjectName(entry.projectId),
+        clockIn,
+        clockOut,
+        pauseMinutes,
+        pauseMs,
+        workHours: calculateWorkHours(clockIn, clockOut, pauseMinutes, entryCreditMinutes(entry)),
+        notes: entry.notes || '',
+        originalNotes: entry.notes || '',
+        isEdited: false,
+        holidayName: clockInDate ? getBavariaHolidayName(clockInDate) : null
+      }
+    })
+
+    const occupiedTimeEntryDates = new Set(entries.map((e) => e.dateKey).filter(Boolean))
+
+    /** Bezahlte Abwesenheitszeile, vergütet mit der Regelarbeitszeit des Wochentags. */
+    const buildAbsenceRow = (
+      date: Date,
+      kind: AbsenceKind,
+      idPrefix: string,
+      projectName: string,
+      notes: string
+    ): ReportEntry => {
+      const dateKey = getDateKey(date)
+      const minutes = regularMinutesForDate(date, regularWorkTimeConfig)
+      const syntheticClockIn = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 7, 0, 0, 0)
+      const syntheticClockOut = new Date(syntheticClockIn.getTime() + minutes * 60 * 1000)
+      const originalEntry: TimeEntry = {
+        id: `${idPrefix}-${dateKey}`,
+        employeeId,
+        projectId: kind,
+        clockInTime: syntheticClockIn,
+        clockOutTime: syntheticClockOut,
+        pauseTotalTime: 0,
+        notes,
+        isVacationDay: kind === 'vacation'
+      }
+      return {
+        id: originalEntry.id,
+        originalEntry,
+        source: 'leave-request',
+        date: formatDateForDisplay(date),
+        dateRaw: date,
+        dateKey,
+        projectId: kind,
+        projectName,
+        clockIn: '',
+        clockOut: '',
+        pauseMinutes: 0,
+        pauseMs: 0,
+        workHours: minutesToHoursLabel(minutes),
+        notes,
+        originalNotes: notes,
+        isEdited: false,
+        isReadOnly: true,
+        absenceKind: kind,
+        holidayName: getBavariaHolidayName(date)
       }
     }
-    return out
+
+    // Feiertage zuerst: an einem gesetzlichen Feiertag kann niemand Urlaub
+    // nehmen oder krank sein, der Feiertag hat Vorrang.
+    const holidayEntries = enumerateDays(start, end)
+      .filter((date) => !isWeekendDate(date) && !!getBavariaHolidayName(date))
+      .filter((date) => !occupiedTimeEntryDates.has(getDateKey(date)))
+      .map((date) =>
+        buildAbsenceRow(
+          date,
+          'holiday',
+          'holiday',
+          'Feiertag',
+          `Gesetzlicher Feiertag: ${getBavariaHolidayName(date)}`
+        )
+      )
+
+    const blockedDates = new Set([
+      ...occupiedTimeEntryDates,
+      ...enumerateDays(start, end)
+        .filter((date) => !!getBavariaHolidayName(date))
+        .map((date) => getDateKey(date))
+    ])
+
+    const vacationEntries = getApprovedLeaveDates(leaveRequests, 'vacation', start, end, blockedDates).map(
+      ({ date, request }) => {
+        const reason = (request.reason || '').trim()
+        return buildAbsenceRow(
+          date,
+          'vacation',
+          `vacation-${request.id || ''}`,
+          'Urlaub',
+          reason ? `Genehmigter Urlaub: ${reason}` : 'Genehmigter Urlaub'
+        )
+      }
+    )
+
+    const vacationDates = new Set(vacationEntries.map((e) => e.dateKey))
+    const sickEntries = getApprovedLeaveDates(
+      leaveRequests,
+      'sick',
+      start,
+      end,
+      new Set([...blockedDates, ...vacationDates])
+    ).map(({ date, request }) => {
+      const reason = (request.reason || '').trim()
+      return buildAbsenceRow(
+        date,
+        'sick',
+        `sick-${request.id || ''}`,
+        'Krankheit',
+        reason ? `Krankheitstag: ${reason}` : 'Krankheitstag'
+      )
+    })
+
+    return [...entries, ...holidayEntries, ...vacationEntries, ...sickEntries].sort((a, b) => {
+      const ta = a.dateRaw?.getTime() || 0
+      const tb = b.dateRaw?.getTime() || 0
+      if (ta !== tb) return ta - tb
+      if (a.source !== b.source) return a.source === 'time-entry' ? -1 : 1
+      return a.id.localeCompare(b.id)
+    })
   }
 
-  const handleSearch = async () => {
+  /**
+   * Lädt den Nachweis eines Mitarbeiters in die Ansicht.
+   *
+   * @param range / employeeIdOverride überschreiben Monatsfeld bzw. Auswahl –
+   *   nötig beim Blättern im Sammellauf, weil State-Änderungen erst beim
+   *   nächsten Rendern greifen.
+   */
+  const handleEmployeeSearch = async (
+    range?: { start: string; end: string },
+    employeeIdOverride?: string
+  ) => {
+    const employeeId = employeeIdOverride || selectedEmployeeId
     if (!employeeId) {
       toast.error('Bitte einen Mitarbeiter auswählen')
       return
     }
+    const zeitraum = range ?? monthRange(month)
+    if (!zeitraum) {
+      toast.error('Bitte einen Monat auswählen')
+      return
+    }
+
     setIsLoading(true)
     setHasSearched(true)
     try {
-      const { start, end } = monthBounds()
-      const [entries, leaveRequests] = await Promise.all([
-        DataService.getTimeEntriesByEmployeeId(employeeId, { from: start, to: end }),
-        DataService.getLeaveRequestsByEmployee(employeeId),
-      ])
-
-      const inRange = entries.filter((e: TimeEntry) => {
-        const d = convertToDate(e.clockInTime)
-        return d && d >= start && d <= end
-      })
-
-      const worked: DatevSourceEntry[] = inRange.map((entry: TimeEntry) => {
-        const clockInDate = convertToDate(entry.clockInTime)
-        const clockOutDate = convertToDate(entry.clockOutTime)
-        const clockIn = formatTime(clockInDate)
-        const clockOut = formatTime(clockOutDate)
-        const pauseMinutes = msToMinutes(entry.pauseTotalTime || 0)
-        return {
-          dateKey: clockInDate ? formatDateForInputLocal(clockInDate) : '',
-          clockIn,
-          effectiveClockOut: clockOut,
-          effectiveWorkMinutes: workMinutesFromParts(clockIn, clockOut, pauseMinutes),
-          effectivePauseMinutes: pauseMinutes,
-        }
-      })
-
-      const occupied = new Set(worked.map((w) => w.dateKey).filter(Boolean))
-      const source = [
-        ...worked,
-        ...absenceEntries(leaveRequests, 'vacation', start, end, occupied),
-        ...absenceEntries(leaveRequests, 'sick', start, end, occupied),
-      ]
-
-      // Feiertage ohne Buchung ebenfalls kennzeichnen.
-      const covered = new Set(source.map((e) => e.dateKey))
-      const cur = new Date(start)
-      while (cur <= end) {
-        const dateKey = formatDateForInputLocal(cur)
-        const day = cur.getDay()
-        if (day !== 0 && day !== 6 && !covered.has(dateKey) && getBavariaHolidayName(cur)) {
-          source.push({
-            dateKey,
-            clockIn: '',
-            effectiveClockOut: '',
-            effectiveWorkMinutes: 0,
-            effectivePauseMinutes: 0,
-            absenceKind: 'holiday',
-          })
-        }
-        cur.setDate(cur.getDate() + 1)
-      }
-
-      setRows(
-        buildDatevRows(source, formatDateForInputLocal(start), formatDateForInputLocal(end))
-      )
+      setReportEntries(await loadReportEntriesFor(employeeId, zeitraum.start, zeitraum.end))
+      setLoadedRange(zeitraum)
+      setSelectedEmployeeName(employeeDisplayName(employeeId))
     } catch (error) {
       console.error('Fehler beim Erstellen des DATEV-Nachweises:', error)
       toast.error('Der Nachweis konnte nicht erstellt werden')
@@ -163,112 +354,786 @@ const DatevReportTab: React.FC = () => {
     }
   }
 
-  const periodLabel = (() => {
-    const [y, m] = month.split('-').map(Number)
-    return new Date(y, m - 1, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })
-  })()
+  // ---------- Gesetzliche Korrektur & Überstunden (reine Anzeige) ----------
 
-  const handlePrint = () => {
-    const employee = employees.find((e) => e.id === employeeId)
-    const html = buildDatevPrintHtml({
-      rows,
-      employeeName: employee ? getEmployeeDisplayName(employee) : '-',
-      periodLabel,
-    })
-    const win = window.open('', '_blank')
-    if (!win) {
-      toast.error('Das Druckfenster wurde blockiert. Bitte Pop-ups erlauben.')
+  const selectedEmployeeRecord = employees.find((e) => e.id === selectedEmployeeId)
+  const employeeHourlyRate = employeeWageRate(selectedEmployeeRecord)
+  const employeeIsApprentice = selectedEmployeeRecord?.isApprentice === true
+  const employeeFixedSalary = selectedEmployeeRecord?.fixedMonthlySalary || 0
+  const overtimeBalanceMinutes =
+    typeof selectedEmployeeRecord?.overtimeBalanceMinutes === 'number'
+      ? selectedEmployeeRecord.overtimeBalanceMinutes
+      : null
+
+  /**
+   * Abgeleitete Sicht auf die Berichtszeilen: gesetzliche Pausen, 10-Std-Grenze
+   * und – falls aktiv – Regelarbeitszeit samt ausbezahlter Überstunden.
+   */
+  const adjustedReport = useMemo(
+    () =>
+      buildAdjustedReport(reportEntries, {
+        hourlyRate: employeeHourlyRate,
+        mealAllowanceRate,
+        isApprentice: employeeIsApprentice,
+        fixedMonthlySalary: employeeFixedSalary,
+        overtimeBalanceMinutes,
+        regularDayMinutes: overtimeMode
+          ? (dateKey: string) => regularMinutesForDateKey(dateKey, regularWorkTimeConfig)
+          : null,
+        requestedPayoutMinutes: overtimeMode ? appliedPayoutMinutes : 0
+      }),
+    [
+      reportEntries,
+      overtimeMode,
+      regularWorkTimeConfig,
+      appliedPayoutMinutes,
+      employeeHourlyRate,
+      mealAllowanceRate,
+      employeeIsApprentice,
+      employeeFixedSalary,
+      overtimeBalanceMinutes
+    ]
+  )
+
+  /** Tageszeilen der DATEV-Vorlage (eine Zeile je Kalendertag). */
+  const datevRows = useMemo(
+    () =>
+      loadedRange ? buildDatevRows(adjustedReport.entries, loadedRange.start, loadedRange.end) : [],
+    [adjustedReport.entries, loadedRange]
+  )
+
+  const periodLabel = (range: { start: string; end: string } | null): string =>
+    range ? monthKeyLabel(range.start.slice(0, 7)) : ''
+
+  /** Der Nachweis in der aktuell angezeigten Fassung – für Druck und PDF. */
+  const currentDatevParams = (): DatevPrintParams => ({
+    rows: datevRows,
+    employeeName: selectedEmployeeName,
+    personnelNumber: selectedEmployeeRecord?.personnelNumber || '',
+    periodLabel: periodLabel(loadedRange),
+    summary: adjustedReport.summary
+  })
+
+  const handleApplyPayout = () => {
+    const requested = parseHoursMinutesInput(payoutInput)
+    if (requested === null) {
+      toast.error('Bitte die Überstunden als Stunden:Minuten angeben, z. B. 2:30')
       return
     }
-    win.document.write(html)
-    win.document.close()
+    setAppliedPayoutMinutes(requested)
+    if (requested === 0) {
+      toast.info('Auszahlung zurückgesetzt – der Nachweis zeigt wieder die Regelarbeitszeit.')
+      return
+    }
+    const preview = buildAdjustedReport(reportEntries, {
+      regularDayMinutes: (dateKey: string) => regularMinutesForDateKey(dateKey, regularWorkTimeConfig),
+      requestedPayoutMinutes: requested
+    })
+    if (preview.payoutUnallocatedMinutes > 0) {
+      toast.error(
+        `Nur ${minutesToHoursLabel(preview.payoutMinutes)} konnten verteilt werden – ` +
+          `${minutesToHoursLabel(preview.payoutUnallocatedMinutes)} passen nicht mehr in den Monat ` +
+          '(10-Std-Grenze je Tag).'
+      )
+      return
+    }
+    toast.success(`${minutesToHoursLabel(preview.payoutMinutes)} auf die Zeilen verteilt.`)
   }
 
-  return (
-    <div className="admin-tab">
-      <div className="tab-header">
-        <div>
-          <h3>Zeiterfassungsbericht DATEV</h3>
-          <p className="no-data" style={{ marginTop: 4, marginBottom: 0 }}>
-            Eine Zeile je Kalendertag im Aufbau der DATEV-Vorlage. Mehrere Stempelungen eines
-            Tages werden zusammengefasst; Projekte und Dokumentation kommen nicht vor. Gerechnet
-            wird mit den gespeicherten Zeiten – dieselben Zahlen wie im Zeiterfassungsbericht.
-          </p>
-        </div>
-      </div>
+  /**
+   * Speichert die Abrechnung des Monats. Im Überstunden-Modus wird genau der
+   * eingetragene Auszahlungsbetrag abgerechnet und vom Überstundenkonto
+   * abgezogen. Die gesetzliche Pausen-/10-Std-Korrektur bleibt außen vor –
+   * sonst verlöre der Mitarbeiter genau die Stunden, die ihm bleiben sollen.
+   */
+  const handleSaveSettlement = async () => {
+    if (!selectedEmployeeId || !loadedRange || reportEntries.length === 0) return
+    const withoutPayout = buildAdjustedReport(reportEntries, {
+      regularDayMinutes: (dateKey: string) => regularMinutesForDateKey(dateKey, regularWorkTimeConfig),
+      requestedPayoutMinutes: 0
+    })
+    const lines = adjustedReport.entries.map((entry, index) => ({
+      timeEntryId: entry.id,
+      dateLabel: entry.date,
+      rawMinutes: workMinutesFromOriginalEntry(entry.originalEntry),
+      correctedMinutes: entry.effectiveWorkMinutes,
+      paidOutMinutes: Math.max(
+        0,
+        entry.effectiveWorkMinutes -
+          (withoutPayout.entries[index]?.effectiveWorkMinutes ?? entry.effectiveWorkMinutes)
+      )
+    }))
 
-      <div className="filter-row">
-        <div className="form-group">
-          <label>Mitarbeiter:</label>
-          <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-            <option value="">Bitte wählen…</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {getEmployeeDisplayName(emp)}
-              </option>
-            ))}
-          </select>
+    const paidOutMinutes = adjustedReport.payoutMinutes
+    const confirmed = window.confirm(
+      paidOutMinutes > 0
+        ? `Abrechnung für ${periodLabel(loadedRange)} speichern und ${minutesToHoursLabel(paidOutMinutes)} Überstunden vom Konto abziehen?`
+        : `Abrechnung für ${periodLabel(loadedRange)} ohne Überstunden-Auszahlung speichern?`
+    )
+    if (!confirmed) return
+
+    setIsSavingSettlement(true)
+    try {
+      await DataService.saveTimeReportSettlement({
+        employeeId: selectedEmployeeId,
+        periodStart: loadedRange.start,
+        periodEnd: loadedRange.end,
+        paidOutMinutes,
+        rawTotalMinutes: adjustedReport.legalTotalMinutes,
+        correctedTotalMinutes: adjustedReport.shownTotalMinutes,
+        lines
+      })
+      toast.success(
+        paidOutMinutes > 0
+          ? `Abrechnung gespeichert. ${minutesToHoursLabel(paidOutMinutes)} Überstunden wurden vom Konto abgezogen.`
+          : 'Abrechnung gespeichert (keine Überstunden zur Auszahlung eingetragen).'
+      )
+      // Den neuen Kontostand nachladen, damit die Anzeige stimmt.
+      const fetched = await DataService.getAllEmployees()
+      setEmployees(fetched.filter(isReportSelectableEmployee))
+      setOvertimeMode(false)
+      setAppliedPayoutMinutes(0)
+      setPayoutInput('0:00')
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Speichern fehlgeschlagen')
+    } finally {
+      setIsSavingSettlement(false)
+    }
+  }
+
+  // ---------- Drucken ----------
+
+  /**
+   * Schreibt ein fertiges Druck-HTML in ein Fenster und öffnet den Druckdialog.
+   * Das Fenster muss der Aufrufer direkt beim Klick öffnen, sonst blockiert der
+   * Browser es als ungefragtes Popup.
+   */
+  const printInto = (printWindow: Window, html: string) => {
+    let hasTriggeredPrint = false
+    const triggerPrint = () => {
+      if (hasTriggeredPrint) return
+      hasTriggeredPrint = true
+      try {
+        printWindow.focus()
+        printWindow.print()
+      } catch (error) {
+        console.error('Druckvorschau konnte nicht geöffnet werden:', error)
+        toast.error('Druckvorschau konnte nicht geöffnet werden')
+      }
+    }
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.onload = () => window.setTimeout(triggerPrint, 100)
+    // Fallback, falls onload in einzelnen Browsern nicht feuert.
+    window.setTimeout(triggerPrint, 450)
+  }
+
+  const handlePrint = () => {
+    if (datevRows.length === 0) {
+      toast.error('Kein Nachweis zum Drucken vorhanden')
+      return
+    }
+    // Ohne Fenster-Optionen öffnen: mit "noopener" liefert window.open null.
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      toast.error('Popup blockiert. Bitte Popups für diese Seite erlauben.')
+      return
+    }
+    try {
+      printInto(printWindow, buildDatevPrintHtml(currentDatevParams()))
+    } catch (error) {
+      console.error('Druckdokument konnte nicht erstellt werden:', error)
+      toast.error('Druckdokument konnte nicht erstellt werden')
+    }
+  }
+
+  // ---------- Sammellauf: Nachweis für alle Mitarbeiter ----------
+
+  const exitBatchMode = () => {
+    setBatchEmployeeIds([])
+    setBatchPeriod(null)
+    setBatchIndex(0)
+    setBatchSelected(new Set())
+  }
+
+  /** Ausgewählte Mitarbeiter in Blätter-Reihenfolge – Grundlage des Sammeldrucks. */
+  const selectedBatchIds = batchEmployeeIds.filter((id) => batchSelected.has(id))
+
+  const toggleBatchSelection = (employeeId: string, aktiv: boolean) => {
+    setBatchSelected((prev) => {
+      const next = new Set(prev)
+      if (aktiv) next.add(employeeId)
+      else next.delete(employeeId)
+      return next
+    })
+  }
+
+  /**
+   * Sucht alle Mitarbeiter, die im Monat gestempelt haben, und öffnet den
+   * Nachweis des ersten. Danach wird mit den Pfeilen durchgeblättert.
+   */
+  const handleSearchAllEmployees = async () => {
+    const range = monthRange(month)
+    if (!range) {
+      toast.error('Bitte einen Monat auswählen')
+      return
+    }
+    const start = new Date(`${range.start}T00:00:00`)
+    const end = new Date(`${range.end}T23:59:59.999`)
+
+    setIsBatchLoading(true)
+    try {
+      const gestempelt = await Promise.all(
+        employees
+          .map((emp) => emp.id)
+          .filter((id): id is string => !!id)
+          .map(async (employeeId) => {
+            const entries = await DataService.getTimeEntriesByEmployeeId(employeeId, {
+              from: start,
+              to: end
+            })
+            const trifftZeitraum = entries.some((entry: TimeEntry) => {
+              if (entry.documentationOnlyEntry) return false
+              const datum = convertToDate(entry.clockInTime)
+              return !!datum && datum >= start && datum <= end
+            })
+            return trifftZeitraum ? employeeId : null
+          })
+      )
+
+      const ids = gestempelt
+        .filter((id): id is string => !!id)
+        .sort((a, b) => employeeDisplayName(a).localeCompare(employeeDisplayName(b), 'de'))
+
+      if (ids.length === 0) {
+        exitBatchMode()
+        toast.error('Im gewählten Monat hat kein Mitarbeiter gestempelt.')
+        return
+      }
+
+      setBatchEmployeeIds(ids)
+      setBatchIndex(0)
+      setBatchSelected(new Set(ids))
+      setBatchPeriod(range)
+      selectEmployee(ids[0])
+      await handleEmployeeSearch(range, ids[0])
+      toast.success(`${ids.length} Mitarbeiter mit Zeiteinträgen – mit den Pfeilen durchblättern.`)
+    } catch (error) {
+      console.error('Sammelauswertung fehlgeschlagen:', error)
+      toast.error('Der Nachweis für alle konnte nicht erstellt werden.')
+    } finally {
+      setIsBatchLoading(false)
+    }
+  }
+
+  const goToBatchEmployee = async (index: number) => {
+    if (!batchPeriod || index < 0 || index >= batchEmployeeIds.length) return
+    const employeeId = batchEmployeeIds[index]
+    setBatchIndex(index)
+    selectEmployee(employeeId)
+    // Die Überstunden-Eingaben gehören zum vorherigen Mitarbeiter.
+    setOvertimeMode(false)
+    setAppliedPayoutMinutes(0)
+    setPayoutInput('0:00')
+    await handleEmployeeSearch(batchPeriod, employeeId)
+  }
+
+  /**
+   * Nachweis eines Mitarbeiters ohne Umweg über die Ansicht – Grundlage des
+   * Sammeldrucks. Lohn, Verpflegungssatz und Azubi/Fixlohn kommen wie in der
+   * Einzelansicht von der Mitarbeiterkarte.
+   */
+  const buildBatchDatev = async (
+    employeeId: string,
+    range: { start: string; end: string }
+  ): Promise<DatevPrintParams> => {
+    const emp = employees.find((e) => e.id === employeeId)
+    const entries = await loadReportEntriesFor(employeeId, range.start, range.end)
+    const options: BuildAdjustedReportOptions = {
+      hourlyRate: employeeWageRate(emp),
+      mealAllowanceRate:
+        typeof emp?.mealAllowanceRate === 'number' ? emp.mealAllowanceRate : DEFAULT_MEAL_ALLOWANCE_EUR,
+      isApprentice: emp?.isApprentice === true,
+      fixedMonthlySalary: emp?.fixedMonthlySalary || 0,
+      overtimeBalanceMinutes:
+        typeof emp?.overtimeBalanceMinutes === 'number' ? emp.overtimeBalanceMinutes : null
+    }
+    const report = buildAdjustedReport(entries, options)
+    return {
+      rows: buildDatevRows(report.entries, range.start, range.end),
+      employeeName: employeeDisplayName(employeeId),
+      personnelNumber: emp?.personnelNumber || '',
+      periodLabel: periodLabel(range),
+      summary: report.summary
+    }
+  }
+
+  const collectBatchReports = async (
+    range: { start: string; end: string },
+    onProgress: (fertig: number) => void
+  ): Promise<DatevPrintParams[]> => {
+    const reports: DatevPrintParams[] = []
+    for (const employeeId of selectedBatchIds) {
+      // Sequenziell: die Abfragen sollen sich nicht gegenseitig ausbremsen, und
+      // der Fortschritt bleibt ablesbar.
+      reports.push(await buildBatchDatev(employeeId, range))
+      onProgress(reports.length)
+    }
+    return reports
+  }
+
+  /** Die ausgewählten Mitarbeiter in EINEM Druckauftrag, je einer pro Blatt. */
+  const handleBatchPrint = async () => {
+    if (!batchPeriod || selectedBatchIds.length === 0) return
+    const range = batchPeriod
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      toast.error('Popup blockiert. Bitte Popups für diese Seite erlauben.')
+      return
+    }
+    printWindow.document.write(
+      '<!doctype html><meta charset="utf-8"><title>Nachweise werden erstellt</title>' +
+        '<p style="font-family:sans-serif;margin:24px">Nachweise werden erstellt …</p>'
+    )
+
+    setBatchPrintProgress(0)
+    try {
+      const reports = await collectBatchReports(range, (fertig) => setBatchPrintProgress(fertig))
+      printInto(
+        printWindow,
+        buildDatevBatchPrintHtml(reports, `Arbeitszeitdokumentation ${periodLabel(range)}`)
+      )
+    } catch (error) {
+      console.error('Sammeldruck fehlgeschlagen:', error)
+      toast.error('Der Sammeldruck konnte nicht erstellt werden.')
+      try {
+        printWindow.close()
+      } catch {
+        /* Fenster ist ggf. schon zu */
+      }
+    } finally {
+      setBatchPrintProgress(null)
+    }
+  }
+
+  const describeAdjustments = (entry: AdjustedReportEntry): string[] => {
+    const reasons: string[] = []
+    if (entry.workTimeAdjustments.includes('break')) reasons.push('Pause')
+    if (entry.workTimeAdjustments.includes('max-hours')) reasons.push('10-Std-Grenze')
+    if (entry.workTimeAdjustments.includes('regular-cap')) reasons.push('Regelarbeitszeit')
+    if (entry.workTimeAdjustments.includes('overtime-payout')) reasons.push('Auszahlung')
+    return reasons
+  }
+  const adjustedDays = new Set(
+    adjustedReport.entries.filter((e) => describeAdjustments(e).length > 0).map((e) => e.dateKey)
+  ).size
+
+  // ---------- Darstellung ----------
+
+  const renderBatchPager = () => {
+    if (batchEmployeeIds.length === 0 || !batchPeriod) return null
+    const aktuelleId = batchEmployeeIds[batchIndex]
+    const busy = isLoading || isBatchLoading || batchPrintProgress !== null
+    const anzahlGewaehlt = selectedBatchIds.length
+    const alleGewaehlt = anzahlGewaehlt === batchEmployeeIds.length
+    const auswahlZusatz = alleGewaehlt ? '' : ` (${anzahlGewaehlt}/${batchEmployeeIds.length})`
+
+    return (
+      <div className={`batch-pager no-print${batchSelected.has(aktuelleId) ? '' : ' is-skipped'}`}>
+        <button
+          type="button"
+          className="batch-pager-arrow"
+          onClick={() => void goToBatchEmployee(batchIndex - 1)}
+          disabled={batchIndex === 0 || busy}
+          aria-label="Vorheriger Mitarbeiter"
+          title="Vorheriger Mitarbeiter"
+        >
+          ‹
+        </button>
+        <div className="batch-pager-info">
+          <span className="batch-pager-count">
+            Mitarbeiter {batchIndex + 1} von {batchEmployeeIds.length}
+          </span>
+          <strong>{selectedEmployeeName || employeeDisplayName(aktuelleId)}</strong>
+          <span className="batch-pager-period">{periodLabel(batchPeriod)}</span>
+          <label className="batch-pager-select" title={'Gilt für „Alle drucken"'}>
+            <input
+              type="checkbox"
+              checked={batchSelected.has(aktuelleId)}
+              onChange={(e) => toggleBatchSelection(aktuelleId, e.target.checked)}
+              disabled={busy}
+            />
+            <span>Mit drucken</span>
+          </label>
         </div>
-        <div className="form-group">
-          <label>Monat:</label>
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-        </div>
-        <div className="form-group">
-          <button type="button" className="btn primary-btn" onClick={handleSearch} disabled={isLoading}>
-            {isLoading ? 'Lade…' : 'Nachweis erstellen'}
+        <button
+          type="button"
+          className="batch-pager-arrow"
+          onClick={() => void goToBatchEmployee(batchIndex + 1)}
+          disabled={batchIndex >= batchEmployeeIds.length - 1 || busy}
+          aria-label="Nächster Mitarbeiter"
+          title="Nächster Mitarbeiter"
+        >
+          ›
+        </button>
+        <div className="batch-pager-actions">
+          <button
+            type="button"
+            className="btn primary-btn"
+            onClick={() => void handleBatchPrint()}
+            disabled={busy || anzahlGewaehlt === 0}
+          >
+            {batchPrintProgress !== null
+              ? `Erstelle ${batchPrintProgress}/${anzahlGewaehlt} …`
+              : `Alle drucken${auswahlZusatz}`}
+          </button>
+          <button
+            type="button"
+            className="btn secondary-btn"
+            onClick={() => setBatchSelected(alleGewaehlt ? new Set() : new Set(batchEmployeeIds))}
+            disabled={busy}
+          >
+            {alleGewaehlt ? 'Keinen auswählen' : 'Alle auswählen'}
+          </button>
+          <button type="button" className="btn secondary-btn" onClick={exitBatchMode}>
+            Sammelansicht beenden
           </button>
         </div>
-        {rows.length > 0 && (
-          <div className="form-group">
-            <button type="button" className="btn secondary-btn" onClick={handlePrint}>
-              Drucken
-            </button>
-          </div>
+        {anzahlGewaehlt === 0 && (
+          <p className="batch-pager-warning">
+            Kein Mitarbeiter ausgewählt – zum Drucken mindestens einen anhaken.
+          </p>
         )}
       </div>
+    )
+  }
 
-      {hasSearched && !isLoading && rows.length === 0 && (
-        <p className="no-data">Für diesen Zeitraum liegen keine Daten vor.</p>
-      )}
+  const renderOvertimePanel = () => (
+    <div className="overtime-panel no-print">
+      <div className="overtime-panel-head">
+        <label className="overtime-toggle">
+          <input
+            type="checkbox"
+            checked={overtimeMode}
+            onChange={(e) => {
+              setOvertimeMode(e.target.checked)
+              if (!e.target.checked) {
+                setAppliedPayoutMinutes(0)
+                setPayoutInput('0:00')
+              }
+            }}
+          />
+          <span>Nur Regelarbeitszeit ausweisen (Überstunden bleiben auf dem Konto)</span>
+        </label>
+        <div className="overtime-facts">
+          {overtimeBalanceMinutes !== null && (
+            <span>
+              Überstundenkonto: <strong>{minutesToHoursLabel(overtimeBalanceMinutes)}</strong>
+            </span>
+          )}
+          {overtimeMode && (
+            <span>
+              Im Monat über Regelarbeitszeit:{' '}
+              <strong>{minutesToHoursLabel(adjustedReport.overtimeAvailableMinutes)}</strong>
+            </span>
+          )}
+          <label className="meal-rate-field">
+            Verpflegungsmehraufwand €/Tag
+            <input
+              type="text"
+              inputMode="decimal"
+              value={mealAllowanceInput}
+              onChange={(e) => setMealAllowanceInput(e.target.value)}
+              className="inline-edit overtime-input"
+              placeholder="z. B. 14"
+            />
+          </label>
+        </div>
+      </div>
 
-      {rows.length > 0 && (
+      {overtimeMode && (
         <>
-          <div className="table-container">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Tag</th>
-                  <th>*</th>
-                  <th>Beginn</th>
-                  <th>Ende</th>
-                  <th>Pause</th>
-                  <th>Dauer</th>
-                  <th>Bemerkung</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.dateKey}>
-                    <td data-label="Tag">{row.day}</td>
-                    <td data-label="*">{row.key}</td>
-                    <td data-label="Beginn">{row.begin}</td>
-                    <td data-label="Ende">{row.end}</td>
-                    <td data-label="Pause">
-                      {row.pauseMinutes ? minutesToHoursLabel(row.pauseMinutes) : ''}
-                    </td>
-                    <td data-label="Dauer">
-                      {row.workMinutes ? minutesToHoursLabel(row.workMinutes) : ''}
-                    </td>
-                    <td data-label="Bemerkung">{row.remark}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="overtime-controls">
+            <label>
+              Regelarbeitszeit Mo–Do
+              <input
+                type="text"
+                inputMode="numeric"
+                value={regularMonThuInput}
+                onChange={(e) => setRegularMonThuInput(e.target.value)}
+                className="inline-edit overtime-input"
+                placeholder="10:00"
+              />
+            </label>
+            <label>
+              Freitag
+              <input
+                type="text"
+                inputMode="numeric"
+                value={regularFriInput}
+                onChange={(e) => setRegularFriInput(e.target.value)}
+                className="inline-edit overtime-input"
+                placeholder="10:00"
+              />
+            </label>
+            <label>
+              Davon auszahlen
+              <input
+                type="text"
+                inputMode="numeric"
+                value={payoutInput}
+                onChange={(e) => setPayoutInput(e.target.value)}
+                className="inline-edit overtime-input"
+                placeholder="2:00"
+              />
+            </label>
+            <button type="button" className="btn secondary-btn" onClick={handleApplyPayout}>
+              In Zeilen übernehmen
+            </button>
+            {appliedPayoutMinutes > 0 && (
+              <button
+                type="button"
+                className="btn secondary-btn"
+                onClick={() => {
+                  setAppliedPayoutMinutes(0)
+                  setPayoutInput('0:00')
+                }}
+              >
+                Zurücksetzen
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn primary-btn"
+              onClick={() => void handleSaveSettlement()}
+              disabled={isSavingSettlement}
+            >
+              {isSavingSettlement ? 'Speichert…' : 'Abrechnung speichern'}
+            </button>
           </div>
-          <p className="no-data" style={{ marginTop: 12 }}>
-            Summe: <strong>{minutesToHoursLabel(datevTotalMinutes(rows))} Std.</strong>
+
+          {adjustedReport.payoutMinutes > 0 && (
+            <p className="overtime-result">
+              <strong>{minutesToHoursLabel(adjustedReport.payoutMinutes)}</strong> auf{' '}
+              {adjustedReport.days.filter((d) => d.payoutMinutes > 0).length} Tage verteilt.
+              {overtimeBalanceMinutes !== null && (
+                <>
+                  {' '}Konto nach dem Speichern:{' '}
+                  <strong>
+                    {minutesToHoursLabel(
+                      Math.max(0, overtimeBalanceMinutes - adjustedReport.payoutMinutes)
+                    )}
+                  </strong>
+                  .
+                </>
+              )}
+            </p>
+          )}
+          {adjustedReport.payoutBeyondActualMinutes > 0 && (
+            <p className="overtime-warning">
+              Achtung: {minutesToHoursLabel(adjustedReport.payoutBeyondActualMinutes)} davon gehen
+              über die tatsächlich gestempelte Zeit hinaus und füllen andere Tage bis zur
+              10-Std-Grenze auf.
+            </p>
+          )}
+          <p className="overtime-hint">
+            Die Auszahlung wird erst mit „Abrechnung speichern" vom Überstundenkonto abgezogen.
+            Stempelsätze und Nachkalkulation bleiben in jedem Fall unberührt.
           </p>
         </>
+      )}
+    </div>
+  )
+
+  const renderSettlementSummary = () => (
+    <div className="settlement-summary">
+      <h4>Abrechnung</h4>
+      <table className="settlement-summary-table">
+        <tbody>
+          {buildSettlementSummaryLines(adjustedReport.summary).map((line) => (
+            <tr
+              key={line.label}
+              className={
+                line.isTotal ? 'settlement-total' : line.isNote ? 'settlement-note' : undefined
+              }
+            >
+              <td>{line.label}</td>
+              <td>{line.detail}</td>
+              <td className="hours-cell">{line.amount}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="settlement-summary-hint">
+        {adjustedReport.summary.hourlyRate > 0 || adjustedReport.summary.isFixedSalary
+          ? 'Steht im Ausdruck auf einem eigenen Blatt hinter dem Nachweis.'
+          : 'Kein Lohn an der Mitarbeiterkarte hinterlegt – die Beträge bleiben 0. Bitte „Lohn für die Abrechnung" pflegen.'}
+      </p>
+    </div>
+  )
+
+  return (
+    <div className="reports-tab">
+      <div className="report-filters no-print">
+        <h3>DATEV-Nachweis erstellen</h3>
+        <p className="batch-trigger-hint" style={{ marginBottom: 12 }}>
+          Eine Zeile je Kalendertag im Aufbau der DATEV-Vorlage „Dokumentation der täglichen
+          Arbeitszeit". Kommen und Gehen stehen im 15-Minuten-Raster, die gesetzliche Pause ist
+          aufgeschlagen, je Tag gilt die 10-Stunden-Grenze. Urlaub, Krankheit und Feiertage zählen
+          mit der Regelarbeitszeit. Die gespeicherten Stempelzeiten bleiben unverändert.
+        </p>
+        <div className="filter-row">
+          <div className="filter-group">
+            <label>Mitarbeiter:</label>
+            <select value={selectedEmployeeId} onChange={(e) => selectEmployee(e.target.value)}>
+              <option value="">-- Bitte wählen --</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name || `${emp.firstName || ''} ${emp.lastName || ''}`.trim()}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="filter-group">
+            <label>Monat:</label>
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          </div>
+        </div>
+        <button
+          onClick={() => {
+            exitBatchMode()
+            setOvertimeMode(false)
+            setAppliedPayoutMinutes(0)
+            setPayoutInput('0:00')
+            void handleEmployeeSearch()
+          }}
+          className="btn primary-btn search-btn"
+          disabled={isLoading}
+        >
+          {isLoading ? 'Lädt...' : 'Nachweis laden'}
+        </button>
+        <div className="batch-trigger no-print">
+          <button
+            type="button"
+            className="btn secondary-btn"
+            onClick={() => void handleSearchAllEmployees()}
+            disabled={isBatchLoading || isLoading}
+          >
+            {isBatchLoading ? 'Suche Mitarbeiter…' : 'Nachweis für alle erstellen'}
+          </button>
+          <p className="batch-trigger-hint">
+            Erstellt den Nachweis für jeden Mitarbeiter mit Zeiteintrag im Monat. Danach mit den
+            Pfeilen durchblättern oder alles in einem Druckauftrag ausgeben – ein Mitarbeiter je
+            Blatt.
+          </p>
+        </div>
+      </div>
+
+      {hasSearched && (
+        <div className="report-content">
+          {renderBatchPager()}
+
+          <div className="report-actions no-print">
+            <div className="actions-left">
+              <h4>
+                {selectedEmployeeName}{' '}
+                <span className="date-range">{periodLabel(loadedRange)}</span>
+              </h4>
+            </div>
+            <div className="actions-right">
+              <button onClick={handlePrint} className="btn primary-btn" disabled={datevRows.length === 0}>
+                Drucken
+              </button>
+            </div>
+          </div>
+
+          {isLoading ? (
+            <p className="no-data">Lädt…</p>
+          ) : datevRows.length === 0 ? (
+            <p className="no-data">Für diesen Zeitraum liegen keine Daten vor.</p>
+          ) : (
+            <>
+              {reportEntries.length > 0 && renderOvertimePanel()}
+
+              {adjustedDays > 0 && (
+                <p className="overtime-hint no-print">
+                  An {adjustedDays} {adjustedDays === 1 ? 'Tag weicht' : 'Tagen weichen'} der
+                  Nachweis von der Stempelung ab (gesetzliche Pause, 10-Std-Grenze oder
+                  Überstunden) – markiert in der Spalte „Korrektur".
+                </p>
+              )}
+
+              <p className="report-scroll-hint no-print">
+                Tabelle seitlich scrollbar – der Tag bleibt dabei stehen.
+              </p>
+              <div className="report-table-container">
+                <table className="report-table datev-table">
+                  <thead>
+                    <tr>
+                      <th>Kalendertag</th>
+                      <th>Beginn</th>
+                      <th>Pause</th>
+                      <th>Ende</th>
+                      <th>Dauer</th>
+                      <th>*</th>
+                      <th className="no-print">Korrektur</th>
+                      <th>Bemerkungen</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {datevRows.map((row) => {
+                      const korrekturen = [
+                        ...new Set(
+                          adjustedReport.entries
+                            .filter((e) => e.dateKey === row.dateKey)
+                            .flatMap(describeAdjustments)
+                        )
+                      ]
+                      return (
+                        <tr key={row.dateKey} className={row.key ? 'datev-key-row' : ''}>
+                          <td className="hours-cell">{row.day}</td>
+                          <td className="hours-cell">{row.begin}</td>
+                          <td className="hours-cell">
+                            {row.pauseMinutes > 0 ? minutesToDecimalHours(row.pauseMinutes) : ''}
+                          </td>
+                          <td className="hours-cell">{row.end}</td>
+                          <td className="hours-cell">
+                            {row.workMinutes > 0 ? minutesToDecimalHours(row.workMinutes) : ''}
+                          </td>
+                          <td className="hours-cell">
+                            <strong>{row.key}</strong>
+                          </td>
+                          <td className="no-print muted-cell">{korrekturen.join(', ')}</td>
+                          <td>{row.remark}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="total-row">
+                      <td colSpan={4}>
+                        <strong>Summe:</strong>
+                      </td>
+                      <td className="hours-cell">
+                        <strong>{minutesToDecimalHours(datevTotalMinutes(datevRows))}</strong>
+                      </td>
+                      <td colSpan={3}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <p className="datev-legend no-print">
+                {DATEV_KEY_LEGEND.filter((item) => item.key !== 'S')
+                  .map((item) => `${item.key} = ${item.label}`)
+                  .join(' · ')}
+              </p>
+
+              {renderSettlementSummary()}
+            </>
+          )}
+        </div>
       )}
     </div>
   )
