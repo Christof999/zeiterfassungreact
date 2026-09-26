@@ -99,6 +99,8 @@ function collectFileReferenceIds(value: unknown, into: Set<string>, depth = 0): 
 /** Firestore-Maximum pro String-Feld (base64Data) — etwas Puffer unter 1.048.487 Bytes */
 const FIRESTORE_MAX_BASE64_BYTES = 1_000_000
 const PROJECTS_CACHE_TTL_MS = 60_000
+/** Lokaler Merker für den Empfänger des DATEV-Nachweises (Fallback ohne Firestore-Regel). */
+const REPORT_RECIPIENT_STORAGE_KEY = 'lauffer_report_mail_recipient'
 
 export type FileUploadLoadOptions = { includeBinary?: boolean }
 
@@ -2561,6 +2563,52 @@ class DataServiceClass {
     } catch (error) {
       console.error('Fehler beim Laden der Zeiterfassungs-Abrechnung:', error)
       return null
+    }
+  }
+
+  /**
+   * Gemerkter Empfänger für den DATEV-Nachweis (Steuerberater). Liegt in
+   * `integrations/reportEmail`, damit alle Admins denselben Empfänger sehen.
+   * Solange die Firestore-Regel dafür nicht veröffentlicht ist, merkt sich
+   * dieser Browser den Empfänger lokal.
+   */
+  async getReportMailRecipient(): Promise<string> {
+    await this.authReadyPromise
+    const local = (() => {
+      try {
+        return localStorage.getItem(REPORT_RECIPIENT_STORAGE_KEY) || ''
+      } catch {
+        return ''
+      }
+    })()
+    try {
+      const snap = await getDoc(doc(db, 'integrations', 'reportEmail'))
+      const recipient = snap.exists() ? String(snap.data().recipient || '') : ''
+      return recipient || local
+    } catch {
+      return local
+    }
+  }
+
+  /** @returns 'shared' = für alle Admins gespeichert, 'local' = nur in diesem Browser */
+  async saveReportMailRecipient(recipient: string): Promise<'shared' | 'local'> {
+    await this.authReadyPromise
+    const trimmed = (recipient || '').trim()
+    try {
+      localStorage.setItem(REPORT_RECIPIENT_STORAGE_KEY, trimmed)
+    } catch {
+      /* privater Modus o. Ä. – dann eben nur in Firestore */
+    }
+    try {
+      await setDoc(
+        doc(db, 'integrations', 'reportEmail'),
+        { recipient: trimmed, updatedAt: new Date() },
+        { merge: true }
+      )
+      return 'shared'
+    } catch (error) {
+      console.warn('Empfänger nur lokal gemerkt (Firestore-Regel für integrations fehlt?):', error)
+      return 'local'
     }
   }
 

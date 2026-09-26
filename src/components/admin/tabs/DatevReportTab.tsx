@@ -38,7 +38,9 @@ import {
   minutesToHoursLabel,
   msToMinutes,
   parseMealAllowanceInput,
-  workMinutesFromOriginalEntry
+  workMinutesFromOriginalEntry,
+  formatCurrency,
+  reportAttachmentFilename
 } from './reports/reportUtils'
 import { buildDatevRows, DATEV_KEY_LEGEND, datevTotalMinutes } from './reports/datevReport'
 import {
@@ -47,6 +49,12 @@ import {
   type DatevPrintParams
 } from './reports/datevPrintHtml'
 import { buildSettlementSummaryLines } from './reports/printHtml'
+import {
+  isValidEmail,
+  sendReportMail,
+  type ReportMailAttachment
+} from '../../../services/reportMailService'
+import { APP_COMPANY_NAME } from '../../../constants/appBranding'
 import '../../../styles/AdminTabs.css'
 import '../../../styles/ReportPrint.css'
 import '../../../styles/DatevReport.css'
@@ -101,6 +109,13 @@ const DatevReportTab: React.FC = () => {
   const [batchPeriod, setBatchPeriod] = useState<{ start: string; end: string } | null>(null)
   const [isBatchLoading, setIsBatchLoading] = useState(false)
   const [batchPrintProgress, setBatchPrintProgress] = useState<number | null>(null)
+  /** Fortschritt des Sammelversands, null = es läuft keiner. */
+  const [batchMailProgress, setBatchMailProgress] = useState<number | null>(null)
+
+  // E-Mail-Versand – der Empfänger ist gepflegt, nicht fest verdrahtet.
+  const [mailRecipient, setMailRecipient] = useState('')
+  const [mailNote, setMailNote] = useState('')
+  const [isSendingMail, setIsSendingMail] = useState(false)
 
   /** Regelarbeitszeit Mo–Do / Fr; ungültige Eingaben fallen auf den Standard (10:00) zurück. */
   const regularWorkTimeConfig: RegularWorkTimeConfig = useMemo(
@@ -122,6 +137,9 @@ const DatevReportTab: React.FC = () => {
         console.error('Fehler beim Laden:', error)
         toast.error('Fehler beim Laden der Daten')
       })
+    DataService.getReportMailRecipient()
+      .then(setMailRecipient)
+      .catch(() => {})
   }, [])
 
   /**
@@ -717,6 +735,171 @@ const DatevReportTab: React.FC = () => {
     }
   }
 
+  // ---------- E-Mail-Versand ----------
+
+  /**
+   * Erzeugt den PDF-Anhang eines Nachweises. Die PDF-Bibliothek wird erst hier
+   * geladen – sie gehört nicht in das Bundle, das beim Öffnen der App zieht.
+   */
+  const buildReportAttachment = async (
+    daten: DatevPrintParams,
+    range: { start: string; end: string }
+  ): Promise<ReportMailAttachment> => {
+    const { buildDatevReportPdf, pdfToBase64 } = await import('./reports/reportPdf')
+    const bytes = await buildDatevReportPdf(daten)
+    return {
+      filename: reportAttachmentFilename('datev-nachweis', daten.employeeName, range),
+      contentBase64: pdfToBase64(bytes),
+      contentType: 'application/pdf'
+    }
+  }
+
+  const handleSaveRecipient = async () => {
+    if (!isValidEmail(mailRecipient)) return
+    const ort = await DataService.saveReportMailRecipient(mailRecipient)
+    toast.success(
+      ort === 'shared'
+        ? 'Empfänger gespeichert.'
+        : 'Empfänger in diesem Browser gemerkt (für alle Admins erst nach Freigabe der Firestore-Regel).'
+    )
+  }
+
+  const handleSendReportMail = async () => {
+    if (datevRows.length === 0 || !loadedRange) {
+      toast.error('Kein Nachweis zum Versenden vorhanden')
+      return
+    }
+    if (!isValidEmail(mailRecipient)) {
+      toast.error('Bitte eine gültige Empfängeradresse angeben.')
+      return
+    }
+    setIsSendingMail(true)
+    try {
+      await sendReportMail({
+        to: mailRecipient.trim(),
+        employeeName: selectedEmployeeName,
+        periodLabel: periodLabel(loadedRange),
+        totalHours: minutesToHoursLabel(datevTotalMinutes(datevRows)),
+        grossWage: formatCurrency(adjustedReport.summary.grossWageAmount),
+        note: mailNote.trim(),
+        senderName: APP_COMPANY_NAME,
+        reports: [await buildReportAttachment(currentDatevParams(), loadedRange)]
+      })
+      toast.success(`Nachweis an ${mailRecipient.trim()} versendet.`)
+      setMailNote('')
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Versand fehlgeschlagen')
+    } finally {
+      setIsSendingMail(false)
+    }
+  }
+
+  /**
+   * Die ausgewählten Mitarbeiter in EINER Mail – ein PDF je Mitarbeiter. Die
+   * Lohnbuchhaltung bekommt zum Monatsabschluss eine Sendung, kann die
+   * Nachweise aber einzeln ablegen.
+   */
+  const handleBatchMail = async () => {
+    if (!batchPeriod || selectedBatchIds.length === 0) return
+    const empfaenger = mailRecipient.trim()
+    if (!isValidEmail(empfaenger)) {
+      toast.error('Bitte unten eine gültige Empfängeradresse angeben.')
+      return
+    }
+    const range = batchPeriod
+    const anzahl = selectedBatchIds.length
+    const wort = anzahl === 1 ? 'Nachweis' : 'Nachweise'
+    const bestaetigt = window.confirm(
+      `${anzahl} ${wort} an ${empfaenger} senden?\n\n` +
+        (anzahl < batchEmployeeIds.length
+          ? `${batchEmployeeIds.length - anzahl} von ${batchEmployeeIds.length} Mitarbeitern sind abgewählt und gehen nicht mit raus.\n\n`
+          : '') +
+        'Es geht eine Mail raus, mit einem PDF je Mitarbeiter.'
+    )
+    if (!bestaetigt) return
+
+    setBatchMailProgress(0)
+    try {
+      const berichte = await collectBatchReports(range, (fertig) => setBatchMailProgress(fertig))
+      const reports: ReportMailAttachment[] = []
+      for (const bericht of berichte) reports.push(await buildReportAttachment(bericht, range))
+      const totalMinutes = berichte.reduce((sum, b) => sum + datevTotalMinutes(b.rows), 0)
+      const grossWage = berichte.reduce((sum, b) => sum + (b.summary?.grossWageAmount || 0), 0)
+
+      await sendReportMail({
+        to: empfaenger,
+        employeeName: `${anzahl} Mitarbeiter`,
+        periodLabel: periodLabel(range),
+        totalHours: minutesToHoursLabel(totalMinutes),
+        grossWage: formatCurrency(Math.round(grossWage * 100) / 100),
+        note: mailNote.trim(),
+        senderName: APP_COMPANY_NAME,
+        reports
+      })
+      toast.success(`${anzahl} ${wort} an ${empfaenger} versendet.`)
+      setMailNote('')
+    } catch (error: unknown) {
+      console.error('Sammelversand fehlgeschlagen:', error)
+      toast.error(error instanceof Error ? error.message : 'Versand fehlgeschlagen')
+    } finally {
+      setBatchMailProgress(null)
+    }
+  }
+
+  /** Versand-Panel. Der Empfänger wird gemerkt, damit er nicht jedes Mal neu getippt wird. */
+  const renderMailPanel = () => (
+    <div className="report-mail-panel no-print">
+      <div className="report-mail-head">
+        <h4>Nachweis per E-Mail senden</h4>
+        <span className="report-mail-attachment">Anhang: Nachweis als PDF</span>
+      </div>
+      <div className="report-mail-row">
+        <label className="report-mail-field">
+          Empfänger
+          <input
+            type="email"
+            value={mailRecipient}
+            onChange={(e) => setMailRecipient(e.target.value)}
+            placeholder="name@kanzlei.de"
+            className="inline-edit"
+          />
+        </label>
+        <button
+          type="button"
+          className="btn secondary-btn"
+          onClick={() => void handleSaveRecipient()}
+          disabled={!isValidEmail(mailRecipient)}
+        >
+          Empfänger merken
+        </button>
+      </div>
+      <label className="report-mail-field report-mail-note">
+        Nachricht (optional)
+        <textarea
+          value={mailNote}
+          onChange={(e) => setMailNote(e.target.value)}
+          rows={2}
+          placeholder="z. B. Bitte um Prüfung bis Monatsende."
+          className="inline-edit"
+        />
+      </label>
+      <div className="report-mail-actions">
+        <button
+          type="button"
+          className="btn primary-btn"
+          onClick={() => void handleSendReportMail()}
+          disabled={isSendingMail || datevRows.length === 0 || !isValidEmail(mailRecipient)}
+        >
+          {isSendingMail ? 'Sende…' : 'Nachweis senden'}
+        </button>
+        <span className="report-mail-hint">
+          Versendet wird der Nachweis in der aktuell angezeigten Fassung – inklusive
+          Abrechnungsblatt auf Seite 2.
+        </span>
+      </div>
+    </div>
+  )
+
   const describeAdjustments = (entry: AdjustedReportEntry): string[] => {
     const reasons: string[] = []
     if (entry.workTimeAdjustments.includes('break')) reasons.push('Pause')
@@ -734,7 +917,8 @@ const DatevReportTab: React.FC = () => {
   const renderBatchPager = () => {
     if (batchEmployeeIds.length === 0 || !batchPeriod) return null
     const aktuelleId = batchEmployeeIds[batchIndex]
-    const busy = isLoading || isBatchLoading || batchPrintProgress !== null
+    const busy =
+      isLoading || isBatchLoading || batchPrintProgress !== null || batchMailProgress !== null
     const anzahlGewaehlt = selectedBatchIds.length
     const alleGewaehlt = anzahlGewaehlt === batchEmployeeIds.length
     const auswahlZusatz = alleGewaehlt ? '' : ` (${anzahlGewaehlt}/${batchEmployeeIds.length})`
@@ -757,14 +941,14 @@ const DatevReportTab: React.FC = () => {
           </span>
           <strong>{selectedEmployeeName || employeeDisplayName(aktuelleId)}</strong>
           <span className="batch-pager-period">{periodLabel(batchPeriod)}</span>
-          <label className="batch-pager-select" title={'Gilt für „Alle drucken"'}>
+          <label className="batch-pager-select" title={'Gilt für „Alle drucken" und „Alle versenden"'}>
             <input
               type="checkbox"
               checked={batchSelected.has(aktuelleId)}
               onChange={(e) => toggleBatchSelection(aktuelleId, e.target.checked)}
               disabled={busy}
             />
-            <span>Mit drucken</span>
+            <span>Drucken / Versenden</span>
           </label>
         </div>
         <button
@@ -790,6 +974,21 @@ const DatevReportTab: React.FC = () => {
           </button>
           <button
             type="button"
+            className="btn primary-btn"
+            onClick={() => void handleBatchMail()}
+            disabled={busy || anzahlGewaehlt === 0 || !isValidEmail(mailRecipient)}
+            title={
+              isValidEmail(mailRecipient)
+                ? `Eine Mail an ${mailRecipient.trim()} – ein PDF je Mitarbeiter`
+                : 'Bitte unten einen gültigen Empfänger eintragen'
+            }
+          >
+            {batchMailProgress !== null
+              ? `Sende ${batchMailProgress}/${anzahlGewaehlt} …`
+              : `Alle versenden${auswahlZusatz}`}
+          </button>
+          <button
+            type="button"
             className="btn secondary-btn"
             onClick={() => setBatchSelected(alleGewaehlt ? new Set() : new Set(batchEmployeeIds))}
             disabled={busy}
@@ -802,7 +1001,7 @@ const DatevReportTab: React.FC = () => {
         </div>
         {anzahlGewaehlt === 0 && (
           <p className="batch-pager-warning">
-            Kein Mitarbeiter ausgewählt – zum Drucken mindestens einen anhaken.
+            Kein Mitarbeiter ausgewählt – zum Drucken oder Versenden mindestens einen anhaken.
           </p>
         )}
       </div>
@@ -1047,6 +1246,8 @@ const DatevReportTab: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {renderMailPanel()}
 
           {isLoading ? (
             <p className="no-data">Lädt…</p>

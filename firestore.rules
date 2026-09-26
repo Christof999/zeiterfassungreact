@@ -100,5 +100,17 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null;
     }
+
+    // NEU (DATEV-Nachweis): Einstellungen wie der gemerkte Mail-Empfänger
+    // (integrations/reportEmail). Noch nicht in der Konsole veröffentlicht.
+    match /integrations/{configId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // NEU (Überstunden): Monatsmeldung des Mitarbeiters, wie viele Stunden
+    // abgerechnet werden sollen. Noch nicht in der Konsole veröffentlicht.
+    match /overtimeSettlements/{settlementId} {
+      allow read, write: if request.auth != null;
+    }
   }
 }
