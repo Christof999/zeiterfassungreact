@@ -77,7 +77,7 @@ const EmployeesTab: React.FC = () => {
   return (
     <div className="employees-tab">
       <div className="tab-header">
-        <h3>Mitarbeiter</h3>
+        <h3>Personalverwaltung</h3>
         <button onClick={handleAdd} className="btn primary-btn">
           Mitarbeiter hinzufügen
         </button>

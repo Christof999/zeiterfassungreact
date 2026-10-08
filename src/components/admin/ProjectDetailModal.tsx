@@ -4,6 +4,7 @@ import type { Project, FileUpload, TimeEntry, VehicleUsage } from '../../types'
 import { Timestamp } from 'firebase/firestore'
 import { toast } from '../ToastContainer'
 import { getFileImageSrc } from '../../utils/fileImageSrc'
+import ReportsTab from './tabs/ReportsTab'
 import '../../styles/Modal.css'
 
 interface ProjectDetailModalProps {
@@ -22,7 +23,7 @@ interface VehicleUsageWithEmployee extends VehicleUsage {
 
 const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ project, onClose }) => {
   const [activeTab, setActiveTab] = useState<
-    'construction-site' | 'documents' | 'timeentries' | 'vehicle-bookings'
+    'construction-site' | 'documents' | 'timeentries' | 'vehicle-bookings' | 'costing'
   >('construction-site')
   const [photos, setPhotos] = useState<FileUpload[]>([])
   const [documents, setDocuments] = useState<FileUpload[]>([])
@@ -628,10 +629,22 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ project, onClos
           >
             Fahrzeugbuchungen
           </button>
+          <button
+            className={`project-tab-btn ${activeTab === 'costing' ? 'active' : ''}`}
+            onClick={() => setActiveTab('costing')}
+          >
+            Nachkalkulation
+          </button>
         </div>
 
         <div className="project-tab-content">
-          {isLoading ? (
+          {activeTab === 'costing' && project.id ? (
+            <ReportsTab
+              defaultReportType="project"
+              allowedReportTypes={['project']}
+              lockedProject={project}
+            />
+          ) : isLoading ? (
             <div className="loading">Lade Daten...</div>
           ) : activeTab === 'construction-site' ? (
             <div className="photo-gallery">

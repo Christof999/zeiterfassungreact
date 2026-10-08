@@ -63,11 +63,14 @@ interface VehicleSummary {
 interface ReportsTabProps {
   defaultReportType?: ReportType
   allowedReportTypes?: ReportType[]
+  /** Im Projektdialog: diese Nachkalkulation direkt öffnen, ohne Projektauswahl. */
+  lockedProject?: Project
 }
 
 const ReportsTab: React.FC<ReportsTabProps> = ({
   defaultReportType = 'employee',
-  allowedReportTypes
+  allowedReportTypes,
+  lockedProject
 }) => {
   const availableReportTypes: ReportType[] =
     allowedReportTypes && allowedReportTypes.length > 0
@@ -103,7 +106,9 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
   const [savingProjectMoveEntryIds, setSavingProjectMoveEntryIds] = useState<Set<string>>(new Set())
 
   // Projekt-Bericht States
-  const [selectedProjectId, setSelectedProjectId] = useState('')
+  const [selectedProjectId, setSelectedProjectId] = useState(lockedProject?.id || '')
+  const [listsReady, setListsReady] = useState(false)
+  const lockedSearchStarted = useRef<string | null>(null)
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [employeeSummaries, setEmployeeSummaries] = useState<EmployeeSummary[]>([])
   const [vehicleSummaries, setVehicleSummaries] = useState<VehicleSummary[]>([])
@@ -189,6 +194,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       setEmployees(filteredEmployees)
       setProjects(fetchedProjects)
       setVehicles(fetchedVehicles)
+      setListsReady(true)
     } catch (error) {
       console.error('Fehler beim Laden:', error)
       toast.error('Fehler beim Laden der Daten')
@@ -659,6 +665,8 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
   interface ProjectDayBlock {
     dateKey: string
     dateLabel: string
+    weekdayLabel: string
+    dateOnly: string
     totalHours: number
     byEmployee: { employeeId: string; name: string; hours: number }[]
     entries: TimeEntry[]
@@ -732,16 +740,19 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
         .sort((a, b) => b.hours - a.hours)
 
       const labelDate = new Date(dateKey + 'T12:00:00')
-      const dateLabel = labelDate.toLocaleDateString('de-DE', {
-        weekday: 'short',
+      const weekdayLabel = labelDate.toLocaleDateString('de-DE', { weekday: 'long' })
+      const dateOnly = labelDate.toLocaleDateString('de-DE', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric'
       })
+      const dateLabel = `${weekdayLabel}, ${dateOnly}`
 
       return {
         dateKey,
         dateLabel,
+        weekdayLabel,
+        dateOnly,
         totalHours: Math.round(totalHours * 100) / 100,
         byEmployee,
         entries: sortedEntries
@@ -899,8 +910,9 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
   }
 
   // ==================== PROJEKT-BERICHT ====================
-  const handleProjectSearch = async () => {
-    if (!selectedProjectId) {
+  const handleProjectSearch = async (projectIdOverride?: string) => {
+    const projectId = typeof projectIdOverride === 'string' ? projectIdOverride : selectedProjectId
+    if (!projectId) {
       toast.error('Bitte wählen Sie ein Projekt aus')
       return
     }
@@ -909,7 +921,9 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     setHasSearched(true)
 
     try {
-      const project = projects.find(p => p.id === selectedProjectId)
+      const project =
+        projects.find(p => p.id === projectId) ||
+        (lockedProject?.id === projectId ? lockedProject : null)
       setSelectedProject(project || null)
 
       // Optionalen Zeitraum vorab bestimmen, um ihn schon serverseitig einzugrenzen
@@ -920,7 +934,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
 
       // Zeiteinträge laden (bei aktivem Zeitfilter serverseitig eingegrenzt)
       let timeEntries = await DataService.getTimeEntriesByProject(
-        selectedProjectId,
+        projectId,
         rangeStart && rangeEnd ? { from: rangeStart, to: rangeEnd } : undefined
       )
 
@@ -975,7 +989,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       // Fahrzeugbuchungen laden
       let vehicleUsages: VehicleUsage[] = []
       try {
-        vehicleUsages = await DataService.getVehicleUsagesByProject(selectedProjectId)
+        vehicleUsages = await DataService.getVehicleUsagesByProject(projectId)
         
         // Optional nach Zeitraum filtern
         if (useTimeFilter && startDate && endDate) {
@@ -1027,10 +1041,10 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       // Fotos und Dokumente laden
       try {
         const [photos, docs] = await Promise.all([
-          DataService.getProjectFiles(selectedProjectId, 'construction_site', {
+          DataService.getProjectFiles(projectId, 'construction_site', {
             includeBinary: true
           }),
-          DataService.getProjectFiles(selectedProjectId, 'document', { includeBinary: true })
+          DataService.getProjectFiles(projectId, 'document', { includeBinary: true })
         ])
         
         // Nach Datum sortieren
@@ -1054,6 +1068,13 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
       setIsLoading(false)
     }
   }
+
+  useEffect(() => {
+    const projectId = lockedProject?.id
+    if (!projectId || !listsReady || lockedSearchStarted.current === projectId) return
+    lockedSearchStarted.current = projectId
+    void handleProjectSearch(projectId)
+  }, [lockedProject?.id, listsReady])
 
   const getEmployeeTotalCost = () => employeeSummaries.reduce((sum, e) => sum + e.totalCost, 0)
   const getVehicleTotalCost = () => vehicleSummaries.reduce((sum, v) => sum + v.totalCost, 0)
@@ -1455,7 +1476,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
     reportType === 'project' && hasSearched && selectedProject ? buildProjectDayBlocks() : []
 
   return (
-    <div className="reports-tab">
+    <div className={`reports-tab${lockedProject ? ' reports-tab--embedded' : ''}`}>
       {/* Tab-Auswahl */}
       {showReportTypeTabs && (
         <div className="report-type-tabs no-print">
@@ -1796,17 +1817,19 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
         <>
           <div className="report-filters no-print">
             <h3>Projekt-Nachkalkulation</h3>
-            <div className="filter-row">
-              <div className="filter-group">
-                <label>Projekt:</label>
-                <select value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
-                  <option value="">-- Bitte wählen --</option>
-                  {projects.map(proj => (
-                    <option key={proj.id} value={proj.id}>{proj.name}</option>
-                  ))}
-                </select>
+            {!lockedProject && (
+              <div className="filter-row">
+                <div className="filter-group">
+                  <label>Projekt:</label>
+                  <select value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
+                    <option value="">-- Bitte wählen --</option>
+                    {projects.map(proj => (
+                      <option key={proj.id} value={proj.id}>{proj.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
+            )}
             
             <div className="filter-row checkbox-row">
               <label className="checkbox-label">
@@ -1828,7 +1851,7 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
               </div>
             )}
 
-            <button onClick={handleProjectSearch} className="btn primary-btn search-btn" disabled={isLoading}>
+            <button onClick={() => handleProjectSearch()} className="btn primary-btn search-btn" disabled={isLoading}>
               {isLoading ? 'Lädt...' : 'Kalkulation erstellen'}
             </button>
           </div>
@@ -1972,8 +1995,8 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
               <div className="project-day-report-section">
                 <h4>Berichte & Dokumentation nach Tag</h4>
                 <p className="project-day-intro">
-                  Pro Kalendertag: geleistete Gesamtstunden, ausklappbare Stunden je Mitarbeiter, Texte aus
-                  Stempelungen sowie Fotos und Dokumente mit Datum.
+                  Je Kalendertag der Wochentag, darunter Datum und die Stunden aller Mitarbeiter.
+                  Darunter die einzelnen Stempelungen, Texte, Fotos und Dokumente.
                 </p>
                 {projectJournalDays.length === 0 &&
                 projectPhotos.length === 0 &&
@@ -1988,9 +2011,10 @@ const ReportsTab: React.FC<ReportsTabProps> = ({
                         <div key={day.dateKey} className="project-day-card">
                           <div className="project-day-header">
                             <div className="project-day-title">
-                              <strong>{day.dateLabel}</strong>
-                              <span className="project-day-hours">
-                                Σ {day.totalHours.toFixed(2)} h (alle Mitarbeiter)
+                              <span className="project-day-weekday">{day.weekdayLabel}</span>
+                              <span className="project-day-meta">
+                                <span className="project-day-date">{day.dateOnly}</span>
+                                <span className="project-day-hours">{day.totalHours.toFixed(2)} h</span>
                               </span>
                             </div>
                             <button

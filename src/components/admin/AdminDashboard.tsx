@@ -13,21 +13,12 @@ import DatevReportTab from './tabs/DatevReportTab'
 import ReportsTab from './tabs/ReportsTab'
 import VacationTab from './tabs/VacationTab'
 import MoergelChat from './MoergelChat'
+import AdminMenu from './AdminMenu'
+import { type AdminMenuItemId } from './menuLayout'
 import { APP_DISPLAY_NAME, APP_LOGO_SRC, APP_LOGO_ALT } from '../../constants/appBranding'
 import '../../styles/AdminDashboard.css'
 
-type TabType =
-  | 'overview'
-  | 'notifications'
-  | 'employees'
-  | 'projects'
-  | 'projectsArchived'
-  | 'vehicles'
-  | 'material'
-  | 'costing'
-  | 'reports'
-  | 'reportsDatev'
-  | 'vacation'
+type TabType = AdminMenuItemId
 
 const AdminDashboard: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabType>('overview')
@@ -164,22 +155,6 @@ const AdminDashboard: React.FC = () => {
     return null
   }
 
-  const tabs = [
-    { id: 'overview' as TabType, label: 'Übersicht' },
-    ...(hasPushSubscription || currentTab === 'notifications'
-      ? [{ id: 'notifications' as TabType, label: 'Benachrichtigungen' }]
-      : []),
-    { id: 'employees' as TabType, label: 'Mitarbeiter' },
-    { id: 'projects' as TabType, label: 'Projekte' },
-    { id: 'projectsArchived' as TabType, label: 'Archivierte Projekte' },
-    { id: 'vehicles' as TabType, label: 'Fahrzeuge' },
-    { id: 'material' as TabType, label: 'Material' },
-    { id: 'costing' as TabType, label: 'Nachkalkulation' },
-    { id: 'vacation' as TabType, label: 'Urlaub' },
-    { id: 'reports' as TabType, label: 'Zeiterfassungsbericht' },
-    { id: 'reportsDatev' as TabType, label: 'Zeiterfassungsbericht DATEV' }
-  ]
-
   const renderPushSettings = (renderAsPage = false) => (
     <section className={`admin-push-card ${renderAsPage ? 'admin-push-card-page' : ''}`}>
       <button
@@ -310,18 +285,14 @@ const AdminDashboard: React.FC = () => {
           >
             ×
           </button>
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              className={`tab-btn ${currentTab === tab.id ? 'active' : ''}`}
-              onClick={() => {
-                setCurrentTab(tab.id)
-                setIsMenuOpen(false)
-              }}
-            >
-              <span className="tab-label">{tab.label}</span>
-            </button>
-          ))}
+          <AdminMenu
+            currentTab={currentTab}
+            showNotifications={hasPushSubscription || currentTab === 'notifications'}
+            onSelect={(tabId) => {
+              setCurrentTab(tabId)
+              setIsMenuOpen(false)
+            }}
+          />
         </nav>
 
         <div className="dashboard-content">
@@ -337,7 +308,6 @@ const AdminDashboard: React.FC = () => {
           {currentTab === 'reportsDatev' && <DatevReportTab />}
           {currentTab === 'costing' && <ReportsTab defaultReportType="project" allowedReportTypes={['project']} />}
           {currentTab === 'vacation' && <VacationTab />}
-          {currentTab === 'reports' && <ReportsTab defaultReportType="employee" allowedReportTypes={['employee']} />}
         </div>
       </main>
 

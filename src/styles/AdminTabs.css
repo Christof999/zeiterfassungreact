@@ -684,6 +684,9 @@
 }
 
 .document-item-card img {
+  object-fit: contain;
+  background: #fff;
+  max-height: 520px;
   border-radius: var(--radius-md);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }

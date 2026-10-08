@@ -508,8 +508,8 @@
 
 .lightbox-content {
   position: relative;
-  width: 95vw;
-  max-width: 900px;
+  width: min(1100px, 96vw);
+  max-width: 96vw;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -530,10 +530,11 @@
 
 .lightbox-content img {
   width: 100%;
-  max-height: 60vh;
+  height: auto;
   object-fit: contain;
   border-radius: var(--radius-md);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  background: #fff;
 }
 
 .lightbox-close {
@@ -599,10 +600,6 @@
   .lightbox-overlay {
     padding: var(--spacing-md);
     padding-top: 60px;
-  }
-  
-  .lightbox-content img {
-    max-height: 50vh;
   }
   
   .lightbox-notes {

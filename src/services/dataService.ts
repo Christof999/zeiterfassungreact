@@ -27,6 +27,7 @@ import { withTimeout } from '../utils/withTimeout'
 import { sanitizeTimeEntryForRead } from '../utils/sanitizeTimeEntry'
 import { getBavariaHolidayName } from '../utils/bavariaHolidays'
 import { getFileImageSrc } from '../utils/fileImageSrc'
+import { fitInsideLongEdge, firestoreFallbackSettings, storageImageSettings } from '../utils/imageFit'
 import { toFileUploadRef } from '../utils/fileUploadRef'
 import * as materials from './data/materials'
 import {
@@ -1334,13 +1335,12 @@ class DataServiceClass {
     // Nicht-Bilder (z. B. PDF) niemals durch den Bild-Encoder schicken — das würde hängen.
     if (!this.isCompressibleImage(file)) return file
     const isDocument = this.isDocumentFileType(type)
-    // Tempo-optimiert fürs Baustellen-Netz: kleinere Uploads ≈ proportional schnellerer
-    // Upload. Am Bildschirm weiterhin scharf, Dokumente/Rechnungen gut lesbar.
-    const maxWidth = isDocument ? 1800 : 1280
-    // preferWebp: kleinere Uploads, wo der Browser es kann; forceJpeg als Fallback (nie PNG).
-    return this.compressImage(file, isDocument ? 0.8 : 0.72, maxWidth, {
-      forceJpeg: true,
-      preferWebp: true
+    // Fotos bleiben fürs Baustellen-Netz kompakt. Lieferscheine und Rechnungen
+    // brauchen die lange Kante und JPEG, sonst ist die Schrift nicht mehr lesbar.
+    const settings = storageImageSettings(isDocument)
+    return this.compressImage(file, settings.quality, settings.maxLongEdge, {
+      forceJpeg: settings.forceJpeg,
+      preferWebp: settings.preferWebp
     })
   }
 
@@ -1532,31 +1532,44 @@ class DataServiceClass {
     sourceWidth: number,
     sourceHeight: number,
     quality: number,
-    maxWidth: number,
+    maxLongEdge: number,
     outputType: string
   ): Promise<Blob | null> {
-    let width = sourceWidth
-    let height = sourceHeight
-    const maxHeight = Math.round(maxWidth * 1.35)
-    if (width > maxWidth) {
-      height = (height * maxWidth) / width
-      width = maxWidth
-    }
-    if (height > maxHeight) {
-      width = (width * maxHeight) / height
-      height = maxHeight
+    const target = fitInsideLongEdge(sourceWidth, sourceHeight, maxLongEdge)
+    // Große Sprünge in einem Schritt machen Schrift weich. Erst halbieren, dann auf Zielgröße.
+    let current: CanvasImageSource = source
+    let currentWidth = Math.max(1, sourceWidth)
+    let currentHeight = Math.max(1, sourceHeight)
+    while (Math.max(currentWidth, currentHeight) > Math.max(target.width, target.height) * 2) {
+      const step = this.drawImageStep(current, Math.round(currentWidth / 2), Math.round(currentHeight / 2))
+      if (!step) break
+      current = step
+      currentWidth = step.width
+      currentHeight = step.height
     }
 
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(width))
-    canvas.height = Math.max(1, Math.round(height))
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return Promise.resolve(null)
-    ctx.drawImage(source, 0, 0, canvas.width, canvas.height)
+    const canvas = this.drawImageStep(current, target.width, target.height)
+    if (!canvas) return Promise.resolve(null)
 
     return new Promise((resolve) => {
       canvas.toBlob((blob) => resolve(blob), outputType, quality)
     })
+  }
+
+  private drawImageStep(
+    source: CanvasImageSource,
+    width: number,
+    height: number
+  ): HTMLCanvasElement | null {
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, width)
+    canvas.height = Math.max(1, height)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height)
+    return canvas
   }
 
   private webpSupport?: boolean
@@ -1620,10 +1633,11 @@ class DataServiceClass {
     type: string
   ): Promise<{ base64: string; mimeType: string }> {
     const isDocument = this.isDocumentFileType(type)
-    let quality = isDocument ? 0.88 : 0.8
-    let maxWidth = isDocument ? 1800 : 1400
-    const minQuality = 0.42
-    const minWidth = 640
+    const fallback = firestoreFallbackSettings(isDocument)
+    let quality = fallback.quality
+    let maxLongEdge = fallback.maxLongEdge
+    const minQuality = fallback.minQuality
+    const minLongEdge = fallback.minLongEdge
     // base64 ist ~4/3 der Rohbytes — daraus die zulässige Blob-Grösse ableiten, statt
     // bei jedem Versuch teuer base64 zu kodieren (nur das Gewinner-Blob wird kodiert).
     const maxBlobBytes = Math.floor((FIRESTORE_MAX_BASE64_BYTES * 3) / 4)
@@ -1640,7 +1654,7 @@ class DataServiceClass {
           decoded.width,
           decoded.height,
           quality,
-          maxWidth,
+          maxLongEdge,
           outputType
         )
         if (blob) {
@@ -1656,10 +1670,10 @@ class DataServiceClass {
         }
 
         if (quality > minQuality + 0.08) {
-          quality -= 0.1
-        } else if (maxWidth > minWidth) {
-          maxWidth = Math.max(minWidth, Math.round(maxWidth * 0.72))
-          quality = isDocument ? 0.78 : 0.7
+          quality -= 0.08
+        } else if (maxLongEdge > minLongEdge) {
+          maxLongEdge = Math.max(minLongEdge, Math.round(maxLongEdge * 0.8))
+          quality = isDocument ? 0.85 : 0.7
         } else {
           break
         }
@@ -1682,7 +1696,7 @@ class DataServiceClass {
   private async compressImage(
     file: File,
     quality: number,
-    maxWidth: number,
+    maxLongEdge: number,
     options?: { forceJpeg?: boolean; preferWebp?: boolean }
   ): Promise<File> {
     const decoded = await this.decodeImageSource(file)
@@ -1693,7 +1707,7 @@ class DataServiceClass {
         decoded.width,
         decoded.height,
         quality,
-        maxWidth,
+        maxLongEdge,
         outputType
       )
       // Falls toBlob fehlschlägt: lieber das Original hochladen als gar nichts.
