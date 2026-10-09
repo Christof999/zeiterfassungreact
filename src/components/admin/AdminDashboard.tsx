@@ -312,7 +312,9 @@ const AdminDashboard: React.FC = () => {
       </main>
 
       {currentAdmin?.isAdmin && (
-        <MoergelChat admin={{ id: currentAdmin.id, name: currentAdmin.name }} />
+        <MoergelChat
+          admin={{ id: currentAdmin.id, name: currentAdmin.name, username: currentAdmin.username }}
+        />
       )}
     </div>
   )

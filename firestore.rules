@@ -108,5 +108,10 @@ service cloud.firestore {
     match /customerReports/{reportId} {
       allow read, write: if request.auth != null;
     }
+
+    // Gemeinsame Mörgel-Chats von Zeiterfassung und Rechnungsprogramm.
+    match /moergelChats/{chatId} {
+      allow read, write: if request.auth != null;
+    }
   }
 }

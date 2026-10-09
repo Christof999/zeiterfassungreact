@@ -466,6 +466,31 @@ const toolDeclarations = [
       properties: { projektId: { type: 'string' } },
       required: ['projektId']
     }
+  },
+  {
+    name: 'sucheImInternet',
+    description:
+      'Durchsucht das Internet. Nur lesen, nichts in der App ändern. Nutzen für Preise, Händler, Bezugsquellen und Fragen, die nicht in der Zeiterfassung stehen.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description:
+            'Wonach gesucht wird, so konkret wie möglich, z. B. "PCI Flexmörtel S1 25 kg" oder "Feiertag Bayern 2026"'
+        },
+        kind: {
+          type: 'string',
+          enum: ['prices', 'suppliers', 'general'],
+          description: 'prices = Preise, suppliers = Händler und Bezugsquellen, general = sonstige Webfrage'
+        },
+        location: {
+          type: 'string',
+          description: 'Ort oder Region, falls der Nutzer einen genannt hat'
+        }
+      },
+      required: ['query', 'kind']
+    }
   }
 ]
 
@@ -1037,6 +1062,40 @@ async function executeTool(
         gesamtStunden: Math.round(summe * 100) / 100
       }
     }
+    case 'sucheImInternet': {
+      const query = String(args.query || '').trim()
+      if (!query) return { status: 'fehler', message: 'Wonach soll gesucht werden?' }
+      const kind = args.kind === 'prices' || args.kind === 'suppliers' ? args.kind : 'general'
+      const response = await fetch('/api/web-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          kind,
+          location: args.location ? String(args.location) : undefined
+        })
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        return {
+          status: 'fehler',
+          message: data?.error || `Internetsuche fehlgeschlagen (${response.status})`
+        }
+      }
+      return {
+        readOnly: true,
+        hinweis:
+          'Nichts wurde gespeichert. Das ist eine Momentaufnahme von heute. Nur die mitgelieferten Links nennen. Preise und Einheiten prüfen.',
+        art: data.kind,
+        suche: data.query,
+        gesuchtAm: data.searchedAt,
+        antwort: data.answer || '',
+        angebote: data.offers || [],
+        orte: data.places || [],
+        quellen: data.sources || [],
+        notiz: data.note || ''
+      }
+    }
     case 'projektStunden': {
       const entries = await DataService.getTimeEntriesByProject(args.projektId)
       let arbeit = 0
@@ -1082,7 +1141,8 @@ function buildSystemInstruction(admin: AdminInfo): string {
     'Wenn der Nutzer eine schreibende Aktion bereits beauftragt hat und alle Pflichtangaben (inkl. aufgelöster IDs) vorhanden sind, rufe die Funktion sofort auf. Sage NICHT „ich benötige noch deine Bestätigung" – das übernimmt die Bestätigungskarte.',
     'Beim Anlegen von Projekt, Maschine oder Mitarbeiter: Wenn ein Pflichtfeld fehlt, frage gezielt danach (ein Feld pro Nachricht). Liegen alle Pflichtfelder vor, rufe die erstelle-Funktion direkt auf (die Bestätigungskarte erscheint dann automatisch).',
     'Beim Umbuchen eines Zeiteintrags werden Fotos, Berichte/Dokumente und Maschinenbuchungen automatisch mitgenommen – erwähne das kurz.',
-    'Nach erledigten Aktionen bestätige knapp das Ergebnis (z. B. „Erledigt – Zeiteintrag nachgetragen.").'
+    'Nach erledigten Aktionen bestätige knapp das Ergebnis (z. B. „Erledigt – Zeiteintrag nachgetragen.").',
+    'Für Preise, Händler, Produkte oder Fragen, die nicht in der Zeiterfassung stehen, nutze sucheImInternet. Die Suche liest nur und ändert nichts. Nenne nur Links, die das Werkzeug zurückgibt, und erfinde keine Preise.'
   ].join(' ')
 }
 
@@ -1157,7 +1217,9 @@ export async function runAgentTurn(
     const responseParts: GeminiPart[] = []
     for (const part of functionCalls) {
       const call = part.functionCall!
-      callbacks.onStatus?.(`führt „${call.name}" aus …`)
+      callbacks.onStatus?.(
+        call.name === 'sucheImInternet' ? 'sucht im Internet …' : `führt „${call.name}" aus …`
+      )
       let result: Record<string, any>
       try {
         result = await executeTool(call.name, call.args || {}, callbacks, admin)
